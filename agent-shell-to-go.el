@@ -1483,7 +1483,7 @@ ORIG-FN is the original function, ARGS are its arguments."
     (when (and buffer
                (buffer-live-p buffer)
                (buffer-local-value 'agent-shell-to-go-mode buffer))
-      (let* ((notification (plist-get args :notification))
+      (let* ((notification (plist-get args :acp-notification))
              (params (alist-get 'params notification))
              (update (alist-get 'update params))
              (update-type (alist-get 'sessionUpdate update))
