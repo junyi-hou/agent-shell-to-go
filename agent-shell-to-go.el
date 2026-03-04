@@ -646,6 +646,60 @@ If TRUNCATE is non-nil, truncate long messages and store full text for 👀 expa
 
 ;;; Message formatting
 
+(defun agent-shell-to-go--markdown-to-mrkdwn (text)
+  "Convert standard Markdown in TEXT to Slack mrkdwn format.
+Preserves code blocks and inline code unchanged."
+  (let ((result "")
+        (pos 0)
+        (len (length text)))
+    ;; Process text, skipping code blocks and inline code
+    (while (< pos len)
+      (cond
+       ;; Fenced code block: ```...```
+       ((and (<= (+ pos 3) len)
+             (string= (substring text pos (+ pos 3)) "```"))
+        (let ((end (string-match "```" text (+ pos 3))))
+          (if end
+              (progn
+                (setq result (concat result (substring text pos (+ end 3))))
+                (setq pos (+ end 3)))
+            ;; No closing ```, take rest as-is
+            (setq result (concat result (substring text pos)))
+            (setq pos len))))
+       ;; Inline code: `...`
+       ((= (aref text pos) ?`)
+        (let ((end (string-match "`" text (1+ pos))))
+          (if end
+              (progn
+                (setq result (concat result (substring text pos (1+ end))))
+                (setq pos (1+ end)))
+            (setq result (concat result "`"))
+            (setq pos (1+ pos)))))
+       ;; Regular text: collect until next ` or end
+       (t
+        (let ((next-code (string-match "`" text pos)))
+          (let* ((chunk-end (or next-code len))
+                 (chunk (substring text pos chunk-end)))
+            ;; Apply markdown->mrkdwn conversions on this chunk
+            ;; Headers: ## Header -> *Header*
+            (setq chunk (replace-regexp-in-string
+                         "^#\\{1,6\\} +\\(.*\\)$" "*\\1*" chunk))
+            ;; Bold: **text** -> *text*
+            (setq chunk (replace-regexp-in-string
+                         "\\*\\*\\([^*]+\\)\\*\\*" "*\\1*" chunk))
+            ;; Strikethrough: ~~text~~ -> ~text~
+            (setq chunk (replace-regexp-in-string
+                         "~~\\([^~]+\\)~~" "~\\1~" chunk))
+            ;; Links: [text](url) -> <url|text>
+            (setq chunk (replace-regexp-in-string
+                         "\\[\\([^]]+\\)\\](\\([^)]+\\))" "<\\2|\\1>" chunk))
+            ;; Images: ![alt](url) -> <url|alt> (already handled by link regex above after ! removal)
+            (setq chunk (replace-regexp-in-string
+                         "!<\\([^>]+\\)|\\([^>]*\\)>" "<\\1|\\2>" chunk))
+            (setq result (concat result chunk))
+            (setq pos chunk-end))))))
+    result))
+
 (defun agent-shell-to-go--truncate-message (text &optional max-len)
   "Truncate TEXT to MAX-LEN (default 500) for Slack."
   (let ((max-len (or max-len 500)))
@@ -659,7 +713,7 @@ If TRUNCATE is non-nil, truncate long messages and store full text for 👀 expa
 
 (defun agent-shell-to-go--format-agent-message (text)
   "Format agent TEXT for Slack."
-  (format ":robot_face: *Agent*\n%s" text))
+  (format ":robot_face: *Agent*\n%s" (agent-shell-to-go--markdown-to-mrkdwn text)))
 
 (defun agent-shell-to-go--format-tool-call (title status &optional output)
   "Format tool call with TITLE, STATUS, and optional OUTPUT for Slack."
