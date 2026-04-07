@@ -721,6 +721,164 @@ Only acts on the first turn-complete when the title has not been updated yet."
 
 ;;; Message formatting
 
+(defun agent-shell-to-go--format-table-rows (rows)
+  "Format ROWS (list of lists of cell strings) into an aligned table string.
+Pads columns, adds a separator after the header row."
+  (let* ((num-cols (apply #'max (mapcar #'length rows)))
+         (col-widths (make-list num-cols 0)))
+    ;; Calculate max width for each column
+    (dolist (row rows)
+      (cl-loop for cell in row
+               for i from 0
+               do (setf (nth i col-widths)
+                        (max (nth i col-widths) (length cell)))))
+    ;; Build formatted lines
+    (let ((formatted '())
+          (first t))
+      (dolist (row rows)
+        (let ((cells '()))
+          (cl-loop for cell in row
+                   for width in col-widths
+                   for i from 0
+                   do (push (if cell
+                                (concat cell (make-string (- width (length cell)) ?\s))
+                              (make-string width ?\s))
+                            cells))
+          (push (concat "  " (mapconcat #'identity (nreverse cells) "   ")) formatted))
+        ;; Add separator line after header
+        (when first
+          (push (concat "  " (mapconcat (lambda (w) (make-string w ?─))
+                                        col-widths "   "))
+                formatted)
+          (setq first nil)))
+      (mapconcat #'identity (nreverse formatted) "\n"))))
+
+(defun agent-shell-to-go--parse-table-line (line)
+  "Parse a markdown table LINE into a list of trimmed cell strings."
+  (let* ((trimmed (string-trim line))
+         ;; Strip leading/trailing pipes
+         (inner (if (string-prefix-p "|" trimmed)
+                    (substring trimmed 1)
+                  trimmed))
+         (inner (if (string-suffix-p "|" inner)
+                    (substring inner 0 -1)
+                  inner)))
+    (mapcar #'string-trim (split-string inner "|"))))
+
+(defun agent-shell-to-go--convert-markdown-table (text)
+  "Convert markdown tables in TEXT to aligned code blocks for Slack.
+Parses columns, pads for alignment, adds header separator.
+Skips tables already inside fenced code blocks."
+  (let ((lines (split-string text "\n"))
+        (result '())
+        (in-code-block nil)
+        (in-table nil)
+        (table-lines '()))
+    (dolist (line lines)
+      (cond
+       ;; Toggle code block state on ``` lines
+       ((string-match-p "^```" line)
+        (when in-table
+          (let* ((rows (mapcar #'agent-shell-to-go--parse-table-line
+                               (nreverse table-lines))))
+            (push (concat "```\n"
+                          (agent-shell-to-go--format-table-rows rows)
+                          "\n```")
+                  result))
+          (setq in-table nil table-lines '()))
+        (setq in-code-block (not in-code-block))
+        (push line result))
+       ;; Inside code block - pass through
+       (in-code-block
+        (push line result))
+       ;; Table line (starts with |)
+       ((string-match-p "^|" line)
+        (setq in-table t)
+        ;; Skip separator lines like |---|---|
+        (unless (string-match-p "^|[-| :]+|$" line)
+          (push line table-lines)))
+       ;; Regular line - flush any accumulated table first
+       (t
+        (when in-table
+          (let* ((rows (mapcar #'agent-shell-to-go--parse-table-line
+                               (nreverse table-lines))))
+            (push (concat "```\n"
+                          (agent-shell-to-go--format-table-rows rows)
+                          "\n```")
+                  result))
+          (setq in-table nil table-lines '()))
+        (push line result))))
+    ;; Flush remaining table
+    (when in-table
+      (let* ((rows (mapcar #'agent-shell-to-go--parse-table-line
+                           (nreverse table-lines))))
+        (push (concat "```\n"
+                      (agent-shell-to-go--format-table-rows rows)
+                      "\n```")
+              result)))
+    (mapconcat #'identity (nreverse result) "\n")))
+
+(defun agent-shell-to-go--markdown-to-mrkdwn (text)
+  "Convert standard Markdown in TEXT to Slack mrkdwn format.
+Preserves code blocks and inline code unchanged."
+  ;; Pre-process: convert markdown tables to code blocks so the main
+  ;; loop preserves them verbatim.
+  (setq text (agent-shell-to-go--convert-markdown-table text))
+  (let ((result "")
+        (pos 0)
+        (len (length text)))
+    ;; Process text, skipping code blocks and inline code
+    (while (< pos len)
+      (cond
+       ;; Fenced code block: ```...```
+       ((and (<= (+ pos 3) len)
+             (string= (substring text pos (+ pos 3)) "```"))
+        (let ((end (string-match "```" text (+ pos 3))))
+          (if end
+              (progn
+                (setq result (concat result (substring text pos (+ end 3))))
+                (setq pos (+ end 3)))
+            ;; No closing ```, take rest as-is
+            (setq result (concat result (substring text pos)))
+            (setq pos len))))
+       ;; Inline code: `...`
+       ((= (aref text pos) ?`)
+        (let ((end (string-match "`" text (1+ pos))))
+          (if end
+              (progn
+                (setq result (concat result (substring text pos (1+ end))))
+                (setq pos (1+ end)))
+            (setq result (concat result "`"))
+            (setq pos (1+ pos)))))
+       ;; Regular text: collect until next ` or end
+       (t
+        (let ((next-code (string-match "`" text pos)))
+          (let* ((chunk-end (or next-code len))
+                 (chunk (substring text pos chunk-end)))
+            ;; Apply markdown->mrkdwn conversions on this chunk
+            ;; Unordered lists: - item or * item -> • item
+            ;; (must run before bold to avoid * being misread)
+            (setq chunk (replace-regexp-in-string
+                         "^\\( *\\)[*-] " "\\1• " chunk))
+            ;; Headers: ## Header -> *Header*
+            (setq chunk (replace-regexp-in-string
+                         "^#\\{1,6\\} +\\(.*\\)$" "*\\1*" chunk))
+            ;; Bold: **text** -> *text*
+            (setq chunk (replace-regexp-in-string
+                         "\\*\\*\\([^*]+\\)\\*\\*" "*\\1*" chunk))
+            ;; Strikethrough: ~~text~~ -> ~text~
+            (setq chunk (replace-regexp-in-string
+                         "~~\\([^~]+\\)~~" "~\\1~" chunk))
+            ;; Links: [text](url) -> <url|text>
+            (setq chunk (replace-regexp-in-string
+                         "\\[\\([^]]+\\)\\](\\([^)]+\\))" "<\\2|\\1>" chunk))
+            ;; Images: ![alt](url) -> <url|alt> (already handled by link regex above after ! removal)
+            (setq chunk (replace-regexp-in-string
+                         "!<\\([^>]+\\)|\\([^>]*\\)>" "<\\1|\\2>" chunk))
+            (setq result (concat result chunk))
+            (setq pos chunk-end))))))
+    result))
+
 (defun agent-shell-to-go--truncate-message (text &optional max-len)
   "Truncate TEXT to MAX-LEN (default 500) for Slack."
   (let ((max-len (or max-len 500)))
@@ -734,7 +892,7 @@ Only acts on the first turn-complete when the title has not been updated yet."
 
 (defun agent-shell-to-go--format-agent-message (text)
   "Format agent TEXT for Slack."
-  (format ":robot_face: *Agent*\n%s" text))
+  (format ":robot_face: *Agent*\n%s" (agent-shell-to-go--markdown-to-mrkdwn text)))
 
 (defun agent-shell-to-go--format-tool-call (title status &optional output)
   "Format tool call with TITLE, STATUS, and optional OUTPUT for Slack."
