@@ -109,6 +109,11 @@ When nil, only status icons are shown (use 👀 reaction to expand)."
   :type 'boolean
   :group 'agent-shell-to-go)
 
+(defcustom agent-shell-to-go-upload-transcript-on-end nil
+  "When non-nil, upload the agent-shell transcript to Slack when the session ends."
+  :type 'boolean
+  :group 'agent-shell-to-go)
+
 (defcustom agent-shell-to-go-authorized-users nil
   "List of Slack user IDs authorized to interact with agents.
 REQUIRED: You must set this for Slack integration to work.
@@ -1978,6 +1983,14 @@ If the shell is busy, queue the message for later processing."
     (setq agent-shell-to-go--turn-complete-subscription nil))
 
   (when agent-shell-to-go--thread-ts
+    (when (and agent-shell-to-go-upload-transcript-on-end
+               (bound-and-true-p agent-shell--transcript-file)
+               (file-exists-p agent-shell--transcript-file))
+      (agent-shell-to-go--upload-file
+       agent-shell--transcript-file
+       (or agent-shell-to-go--channel-id agent-shell-to-go-channel-id)
+       agent-shell-to-go--thread-ts
+       "Session transcript"))
     (agent-shell-to-go--send ":wave: Session ended" agent-shell-to-go--thread-ts))
 
   ;; Untrack this buffer
