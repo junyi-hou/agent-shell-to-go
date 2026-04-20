@@ -1,33 +1,104 @@
 # agent-shell-to-go
 
-Emacs package that mirrors agent-shell conversations to Slack.
+Emacs package that mirrors agent-shell conversations to remote messaging transports (Slack today; Discord next).
 
 ## Testing Changes
 
 Reload after editing:
 ```bash
-emacsclient -e '(load-file "/Users/elle/code/agent-shell-to-go/agent-shell-to-go.el")'
+emacsclient -e '(load-file "/Users/dad/Projects/agent-shell-to-go/agent-shell-to-go.el")'
 ```
+
+## Architecture (three files)
+
+```
+agent-shell-to-go.el               shared core + transport protocol
+agent-shell-to-go-slack.el         Slack transport implementation
+agent-shell-to-go-bridge.el        agent-shell integration (transport-agnostic)
+```
+
+Load order: main → slack → bridge (main provides itself first so
+`(require 'agent-shell-to-go)` in slave files is a no-op).
+
+### Transport protocol (cl-defgeneric in main)
+
+All sends/reads/threads/formatting go through generics dispatched on a
+`agent-shell-to-go-transport` struct (a `cl-defstruct`).  Slack and the
+test transport each provide `cl-defmethod` implementations.
+
+Key generics:
+- Lifecycle: `transport-connect/disconnect/connected-p/authorized-p/bot-user-id`
+- Send: `transport-send-text`, `transport-edit-message`, `transport-upload-file`
+- Read: `transport-get-message-text`, `transport-get-reactions`, `transport-fetch-thread-replies`
+- Threads: `transport-start-thread`, `transport-update-thread-header`, `transport-ensure-project-channel`
+- Format: `transport-format-tool-call-start/result/diff/user-message/agent-message/markdown`
+- Storage: `transport-storage-root` → `~/.agent-shell/{transport-name}/`
+
+### Inbound hooks (in main)
+
+Three hook variables; transports fire them with normalized plists:
+
+- `agent-shell-to-go-message-hook` `:transport :channel :thread-id :user :text :msg-id`
+- `agent-shell-to-go-reaction-hook` `:transport :channel :msg-id :user :action :raw-emoji :added-p`
+- `agent-shell-to-go-slash-command-hook` `:transport :command :args :args-text :channel :user :interaction-token`
+
+Reaction `:action` is a canonical symbol from:
+`hide expand-truncated expand-full permission-allow permission-always permission-reject heart bookmark`
+
+### Reaction canonicalization (Slack)
+
+`agent-shell-to-go-slack-reaction-map` defcustom maps canonical action symbols
+to lists of raw Slack emoji names.
+
+### Hook handler registration
+
+- **main** registers `agent-shell-to-go--handle-presentation-reaction` on the
+  reaction hook first.  Presentation actions (hide/expand/collapse) are handled
+  entirely here; bridge never sees them.
+- **bridge** registers message/reaction/slash handlers.  Reaction handler only
+  processes `heart`, `bookmark`, and `permission-*` actions.
 
 ## Key State
 
-Buffer-local variables (in agent-shell buffers):
-- `agent-shell-to-go--thread-ts` - Slack thread timestamp for this session
-- `agent-shell-to-go--channel-id` - Slack channel ID (may differ per project)
-- `agent-shell-to-go--current-agent-message` - Accumulator for streaming chunks
-- `agent-shell-to-go--from-slack` - Flag to prevent echo when message came from Slack
+Buffer-local (in each agent-shell buffer with mirroring on):
+- `agent-shell-to-go--transport` — transport struct in use
+- `agent-shell-to-go--channel-id` — remote channel id
+- `agent-shell-to-go--thread-id` — remote thread id
+- `agent-shell-to-go--current-agent-message` — streaming accumulator
+- `agent-shell-to-go--from-remote` — prevents echo on injected messages
 
-Global state:
-- `agent-shell-to-go--active-buffers` - List of buffers with active mirroring
-- `agent-shell-to-go--project-channels` - Hash table: project path -> channel ID
-- `agent-shell-to-go--websocket` - WebSocket connection to Slack
-- `agent-shell-to-go--pending-permissions` - Alist of permission requests awaiting reaction
+Global:
+- `agent-shell-to-go--active-buffers` — list of live mirrored buffers
+- `agent-shell-to-go--pending-permissions` — alist keyed by `(transport-name channel msg-id)`
+- `agent-shell-to-go--transports` — hash of registered transport structs
 
 ## Storage Locations
 
-- `~/.agent-shell/slack/` - Hidden message originals (for 🙈 unhide)
-- `~/.agent-shell/slack-truncated/` - Full text of truncated messages (for 👀 expand)
-- Channel mappings saved to `agent-shell-to-go-channels-file`
+Each transport gets its own subdirectory under `agent-shell-to-go-storage-base-dir`
+(default `~/.agent-shell/`):
+
+- `~/.agent-shell/slack/hidden/{channel}/{msg-id}.txt` — original text of hidden messages
+- `~/.agent-shell/slack/truncated/{channel}/{msg-id}.txt` — full text of truncated messages
+- `~/.agent-shell/slack/truncated/{channel}/{msg-id}.txt.collapsed` — collapsed form
+
+Channel mappings persisted to `agent-shell-to-go-slack-channels-file`.
+
+## Renamed defcustoms (0.3.0)
+
+Slack-specific vars now have a `-slack-` prefix.  Old names remain as
+`defvaralias` + `make-obsolete-variable` for one release:
+
+| Old name | New name |
+|----------|----------|
+| `agent-shell-to-go-bot-token` | `agent-shell-to-go-slack-bot-token` |
+| `agent-shell-to-go-app-token` | `agent-shell-to-go-slack-app-token` |
+| `agent-shell-to-go-channel-id` | `agent-shell-to-go-slack-channel-id` |
+| `agent-shell-to-go-authorized-users` | `agent-shell-to-go-slack-authorized-users` |
+| `agent-shell-to-go-user-id` | `agent-shell-to-go-slack-user-id` |
+| `agent-shell-to-go-per-project-channels` | `agent-shell-to-go-slack-per-project-channels` |
+| `agent-shell-to-go-channel-prefix` | `agent-shell-to-go-slack-channel-prefix` |
+| `agent-shell-to-go-channels-file` | `agent-shell-to-go-slack-channels-file` |
+| `agent-shell-to-go-env-file` | `agent-shell-to-go-slack-env-file` |
 
 ## Debugging
 
@@ -36,42 +107,37 @@ Enable debug logging:
 (setq agent-shell-to-go-debug t)
 ```
 
-Check `*Messages*` buffer for `agent-shell-to-go:` prefixed logs.
+Debug lines are written to `*agent-shell-to-go-debug*` (timestamped, capped at `agent-shell-to-go-event-log-max-entries`).
+Open it with `M-x agent-shell-to-go-show-debug-log`.
 
-Use `!debug` command in Slack thread to get session info.
+Check `*Agent Shell Events*` for the Slack inbound event log.
+
+Use `!debug` in a thread to get session/channel/thread info.
 
 Common issues:
-- **Reaction not working**: Check if reaction event shows in `*Messages*`. Slack reaction names don't include colons (e.g., "eyes" not ":eyes:")
-- **Message not expanding**: Check if file exists in `~/.agent-shell/slack-truncated/CHANNEL/TIMESTAMP.txt`
-- **UTF-8 issues**: Uses curl for API requests to handle encoding properly
-- **Thread not found**: `--find-buffer-for-thread` matches on both thread-ts and channel-id
-
-## Architecture
-
-- `--api-request`: All Slack API calls go through curl (for UTF-8 support)
-- `--send`: Central message sending, handles truncation and storage
-- `--on-notification`: Advice on agent-shell to capture tool calls/responses
-- `--handle-reaction-event`: Dispatches reactions to hide/expand/heart/permission handlers
-- `--inject-message`: Sends Slack messages into agent-shell as if typed locally
+- **Reaction not working**: Check `*agent-shell-to-go-debug*`. Slack emoji names have no colons (e.g. `eyes` not `:eyes:`).
+- **Message not expanding**: Check `~/.agent-shell/slack/truncated/CHANNEL/MSG-ID.txt`.
+- **UTF-8 issues**: Slack API calls use curl; fallback strips non-ASCII automatically.
+- **Thread not found**: `--find-buffer-for-transport-channel-thread` matches transport + channel + thread.
 
 ## Three-State Message Expansion
 
-Tool outputs (when `agent-shell-to-go-show-tool-output` is nil) have three states:
-1. **Collapsed** - Just status icon (✅ or ❌)
-2. **Truncated** (👀) - First ~500 chars + "... 📖 for full output"
-3. **Full** (📖) - Complete output up to Slack's ~4k limit
+Tool outputs (`agent-shell-to-go-show-tool-output` nil) have three states:
+1. **Collapsed** — just a status icon (✅ / ❌)
+2. **Truncated** — first ~500 chars (add `eyes` reaction)
+3. **Full** — complete output up to transport limit (add `book` reaction)
 
-Files stored in `~/.agent-shell/slack-truncated/CHANNEL/`:
-- `TIMESTAMP.txt` - Full output text
-- `TIMESTAMP.txt.collapsed` - Original collapsed form (status icon)
+Remove the reaction to collapse back.
 
-## Reaction Handlers
+## Reaction → canonical actions (Slack defaults)
 
-| Reaction | Function |
-|----------|----------|
-| see_no_evil, no_bell | `--hide-message` (remove to unhide) |
-| eyes | `--expand-message` (truncated ~500 char view, remove to collapse) |
-| book, open_book | `--full-expand-message` (full output, remove to collapse) |
-| heart, heart_eyes, etc. | `--handle-heart-reaction` |
-| bookmark | `--handle-bookmark-reaction` |
-| white_check_mark, +1, unlock, star, x, -1 | Permission responses |
+| Slack emoji(s) | Canonical action | Handler |
+|----------------|-----------------|---------|
+| `see_no_evil`, `no_bell` | `hide` | main: edit to placeholder; remove to restore |
+| `eyes` | `expand-truncated` | main: show ~500 chars; remove to collapse |
+| `book`, `open_book` | `expand-full` | main: show full text; remove to collapse |
+| `heart`, `heart_eyes`, … | `heart` | bridge: inject appreciation |
+| `bookmark` | `bookmark` | bridge: create org TODO |
+| `white_check_mark`, `+1` | `permission-allow` | bridge: send permission response |
+| `unlock`, `star` | `permission-always` | bridge: send permission response |
+| `x`, `-1` | `permission-reject` | bridge: send permission response |
