@@ -128,20 +128,20 @@ Used to translate raw Slack reactions to canonical hook actions."
 
 (defun agent-shell-to-go--slack-emoji-to-action (emoji)
   "Return the canonical action symbol for Slack EMOJI, or nil."
-  (car (seq-find (lambda (pair) (member emoji (cdr pair)))
-                 agent-shell-to-go-slack-reaction-map)))
+  (car
+   (seq-find
+    (lambda (pair) (member emoji (cdr pair))) agent-shell-to-go-slack-reaction-map)))
 
 ; Struct 
 
-(cl-defstruct
- (agent-shell-to-go-slack-transport
-  (:include agent-shell-to-go-transport)
-  (:constructor agent-shell-to-go--make-slack-transport))
- "Slack transport state."
- ws ; agent-shell-to-go--ws struct
- bot-user-id-cache
- (processed-ts (make-hash-table :test 'equal))
- (project-channels (make-hash-table :test 'equal)))
+(cl-defstruct (agent-shell-to-go-slack-transport
+               (:include agent-shell-to-go-transport)
+               (:constructor agent-shell-to-go--make-slack-transport))
+  "Slack transport state."
+  ws ; agent-shell-to-go--ws struct
+  bot-user-id-cache
+  (processed-ts (make-hash-table :test 'equal))
+  (project-channels (make-hash-table :test 'equal)))
 
 ; Low-level API helpers 
 
@@ -245,8 +245,8 @@ METHOD is GET or POST, ENDPOINT is without the base URL, DATA is the payload."
            "GET" "conversations.list?types=public_channel,private_channel&limit=1000"))
          (channels (alist-get 'channels resp)))
     (when channels
-      (alist-get 'id (seq-find (lambda (ch) (equal (alist-get 'name ch) name))
-                               channels)))))
+      (alist-get
+       'id (seq-find (lambda (ch) (equal (alist-get 'name ch) name)) channels)))))
 
 (defun agent-shell-to-go--slack-get-or-create-project-channel (transport project-path)
   "Return the Slack channel id for PROJECT-PATH, creating it if necessary."
@@ -288,20 +288,23 @@ METHOD is GET or POST, ENDPOINT is without the base URL, DATA is the payload."
 (defun agent-shell-to-go--slack-format-table-rows (rows)
   "Format ROWS (list of lists of strings) as an aligned text table."
   (let* ((num-cols (apply #'max (mapcar #'length rows)))
-         (col-widths (seq-reduce
-                      (lambda (widths row)
-                        (seq-mapn (lambda (w cell) (max w (length cell))) widths row))
-                      rows
-                      (make-list num-cols 0))))
+         (col-widths
+          (seq-reduce
+           (lambda (widths row)
+             (seq-mapn (lambda (w cell) (max w (length cell))) widths row))
+           rows (make-list num-cols 0))))
     (let ((formatted nil)
           (first t))
       (dolist (row rows)
-        (push (concat "  "
-                      (mapconcat #'identity
-                                 (seq-mapn (lambda (cell width)
-                                             (concat cell (make-string (- width (length cell)) ?\s)))
-                                           row col-widths)
-                                 "   "))
+        (push (concat
+               "  "
+               (mapconcat #'identity
+                          (seq-mapn (lambda (cell width)
+                                      (concat
+                                       cell (make-string (- width (length cell)) ?\s)))
+                                    row
+                                    col-widths)
+                          "   "))
               formatted)
         (when first
           (push (concat
@@ -855,6 +858,10 @@ Options plist supports :truncate :ephemeral :user-id :interaction-token."
          (event-type (alist-get 'type event))
          (user (alist-get 'user event))
          (bot-id (alist-get 'bot_id event)))
+    ;; Skip bot messages silently (they'll be ignored anyway since this is inbound
+    ;; message from slack)
+    ;; NOTE: This skips ALL bot messages. If we want agents to message each other in the
+    ;; future, we'd need to allowlist specific bot IDs here instead.
     (unless bot-id
       (agent-shell-to-go--debug "slack event: %s from %s" event-type user)
       (if (not (agent-shell-to-go-transport-authorized-p transport user))
@@ -882,7 +889,8 @@ Options plist supports :truncate :ephemeral :user-id :interaction-token."
                (not bot-id)
                (not (equal user (agent-shell-to-go-transport-bot-user-id transport)))
                (not (agent-shell-to-go--slack-message-seen-p transport ts)))
-      (apply #'run-hook-with-args 'agent-shell-to-go-message-hook
+      (apply #'run-hook-with-args
+             'agent-shell-to-go-message-hook
              (list
               :transport transport
               :channel channel
@@ -905,7 +913,8 @@ ADDED-P is t for reaction_added, nil for reaction_removed."
      (if added-p
          "added"
        "removed"))
-    (apply #'run-hook-with-args 'agent-shell-to-go-reaction-hook
+    (apply #'run-hook-with-args
+           'agent-shell-to-go-reaction-hook
            (list
             :transport transport
             :channel channel
@@ -932,7 +941,8 @@ ADDED-P is t for reaction_added, nil for reaction_removed."
          `((channel . ,channel)
            (user . ,user)
            (text . ":no_entry: You are not authorized to use this command.")))
-      (apply #'run-hook-with-args 'agent-shell-to-go-slash-command-hook
+      (apply #'run-hook-with-args
+             'agent-shell-to-go-slash-command-hook
              (list
               :transport transport
               :command command

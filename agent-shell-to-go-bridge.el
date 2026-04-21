@@ -468,48 +468,46 @@ OPTIONS is forwarded to `agent-shell-to-go-transport-send-text'."
 
 ; Inbound hook handlers (registered on message/reaction/slash hooks) 
 
-(cl-defun
- agent-shell-to-go--bridge-on-message
- (&key transport channel thread-id text &allow-other-keys)
- "Handle an inbound message from a transport."
- (let ((buffer
-        (and thread-id
-             (agent-shell-to-go--find-buffer-for-transport-channel-thread
-              transport channel
-              thread-id))))
-   (when buffer
-     (with-current-buffer buffer
-       (if (string-prefix-p "!" text)
-           (agent-shell-to-go--handle-command text buffer)
-         (agent-shell-to-go--inject-message text))))))
-
-(cl-defun
- agent-shell-to-go--bridge-on-reaction
- (&key transport channel msg-id action added-p &allow-other-keys)
- "Handle an inbound reaction from a transport.
-Presentation reactions are handled by the main dispatcher registered first.
-Here we only handle agent-state reactions."
- (when added-p
-   (pcase action
-     ('heart
-      (let* ((buffer
+(cl-defun agent-shell-to-go--bridge-on-message
+    (&key transport channel thread-id text &allow-other-keys)
+  "Handle an inbound message from a transport."
+  (let ((buffer
+         (and thread-id
               (agent-shell-to-go--find-buffer-for-transport-channel-thread
                transport channel
-               nil))
-             (thread-id
-              (and buffer (buffer-local-value 'agent-shell-to-go--thread-id buffer)))
-             (message-text
-              (and buffer
-                   (agent-shell-to-go-transport-get-message-text
-                    transport channel msg-id))))
-        (when (and buffer message-text)
-          (with-current-buffer buffer
-            (agent-shell-to-go--inject-message
-             (format "The user heart reacted to: %s" message-text))))))
-     ('bookmark (agent-shell-to-go--handle-bookmark-reaction transport channel msg-id))
-     ((or 'permission-allow 'permission-always 'permission-reject)
-      (agent-shell-to-go--handle-permission-reaction
-       transport channel msg-id action)))))
+               thread-id))))
+    (when buffer
+      (with-current-buffer buffer
+        (if (string-prefix-p "!" text)
+            (agent-shell-to-go--handle-command text buffer)
+          (agent-shell-to-go--inject-message text))))))
+
+(cl-defun agent-shell-to-go--bridge-on-reaction
+    (&key transport channel msg-id action added-p &allow-other-keys)
+  "Handle an inbound reaction from a transport.
+Presentation reactions are handled by the main dispatcher registered first.
+Here we only handle agent-state reactions."
+  (when added-p
+    (pcase action
+      ('heart
+       (let* ((buffer
+               (agent-shell-to-go--find-buffer-for-transport-channel-thread
+                transport channel
+                nil))
+              (thread-id
+               (and buffer (buffer-local-value 'agent-shell-to-go--thread-id buffer)))
+              (message-text
+               (and buffer
+                    (agent-shell-to-go-transport-get-message-text
+                     transport channel msg-id))))
+         (when (and buffer message-text)
+           (with-current-buffer buffer
+             (agent-shell-to-go--inject-message
+              (format "The user heart reacted to: %s" message-text))))))
+      ('bookmark (agent-shell-to-go--handle-bookmark-reaction transport channel msg-id))
+      ((or 'permission-allow 'permission-always 'permission-reject)
+       (agent-shell-to-go--handle-permission-reaction
+        transport channel msg-id action)))))
 
 (defun agent-shell-to-go--handle-bookmark-reaction (transport channel msg-id)
   "Create an org TODO for MSG-ID in CHANNEL on TRANSPORT."
@@ -572,58 +570,55 @@ Here we only handle agent-state reactions."
                    :option-id option-id
                    :state state)))
               (setq agent-shell-to-go--pending-permissions
-                    (cl-remove
-                     key
-                     agent-shell-to-go--pending-permissions
-                     :key #'car
-                     :test #'equal)))))))))
+                    (cl-remove key agent-shell-to-go--pending-permissions
+                               :key #'car
+                               :test #'equal)))))))))
 
-(cl-defun
- agent-shell-to-go--bridge-on-slash-command
- (&key transport command args channel &allow-other-keys)
- "Handle an inbound slash command from a transport."
- (let* ((typed-args args)
-        (reply
-         (lambda (text)
-           (agent-shell-to-go-transport-send-text transport channel nil text))))
-   (pcase command
-     ("/new-agent" (let* ((folder
+(cl-defun agent-shell-to-go--bridge-on-slash-command
+    (&key transport command args channel &allow-other-keys)
+  "Handle an inbound slash command from a transport."
+  (let* ((typed-args args)
+         (reply
+          (lambda (text)
+            (agent-shell-to-go-transport-send-text transport channel nil text))))
+    (pcase command
+      ("/new-agent" (let* ((folder
+               (expand-file-name
+                (or (plist-get typed-args :folder) agent-shell-to-go-default-folder)))
+              (container-p (plist-get typed-args :container-p)))
+         (agent-shell-to-go--start-agent-in-folder
+          folder container-p transport channel)))
+      ("/new-agent-container" (let ((folder
               (expand-file-name
-               (or (plist-get typed-args :folder) agent-shell-to-go-default-folder)))
-             (container-p (plist-get typed-args :container-p)))
-        (agent-shell-to-go--start-agent-in-folder
-         folder container-p transport channel)))
-     ("/new-agent-container" (let ((folder
-             (expand-file-name
-              (or (plist-get typed-args :folder) agent-shell-to-go-default-folder))))
-        (agent-shell-to-go--start-agent-in-folder folder t transport channel)))
-     ("/new-project" (let ((project-name (plist-get typed-args :project-name)))
-        (if (not project-name)
-            (funcall reply "Usage: `/new-project <project-name>`")
-          (let ((project-dir
-                 (expand-file-name project-name agent-shell-to-go-projects-directory)))
-            (if (file-exists-p project-dir)
-                (funcall reply (format "Project already exists: `%s`" project-dir))
-              (funcall reply (format "Creating project: `%s`" project-dir))
-              (let ((start-fn
-                     (lambda (final-dir)
-                       (funcall reply "Starting Claude Code…")
-                       (agent-shell-to-go--start-agent-in-folder
-                        final-dir nil transport channel))))
-                (if agent-shell-to-go-new-project-function
-                    (funcall agent-shell-to-go-new-project-function
-                             project-name
-                             (expand-file-name agent-shell-to-go-projects-directory)
-                             start-fn)
-                  (make-directory project-dir t)
-                  (funcall start-fn project-dir))))))))
-     ("/projects" (let ((projects (agent-shell-to-go--get-open-projects)))
-        (if projects
-            (progn
-              (funcall reply "*Open Projects:*")
-              (dolist (p projects)
-                (funcall reply p)))
-          (funcall reply "No open projects found")))))))
+               (or (plist-get typed-args :folder) agent-shell-to-go-default-folder))))
+         (agent-shell-to-go--start-agent-in-folder folder t transport channel)))
+      ("/new-project" (let ((project-name (plist-get typed-args :project-name)))
+         (if (not project-name)
+             (funcall reply "Usage: `/new-project <project-name>`")
+           (let ((project-dir
+                  (expand-file-name project-name agent-shell-to-go-projects-directory)))
+             (if (file-exists-p project-dir)
+                 (funcall reply (format "Project already exists: `%s`" project-dir))
+               (funcall reply (format "Creating project: `%s`" project-dir))
+               (let ((start-fn
+                      (lambda (final-dir)
+                        (funcall reply "Starting Claude Code…")
+                        (agent-shell-to-go--start-agent-in-folder
+                         final-dir nil transport channel))))
+                 (if agent-shell-to-go-new-project-function
+                     (funcall agent-shell-to-go-new-project-function
+                              project-name
+                              (expand-file-name agent-shell-to-go-projects-directory)
+                              start-fn)
+                   (make-directory project-dir t)
+                   (funcall start-fn project-dir))))))))
+      ("/projects" (let ((projects (agent-shell-to-go--get-open-projects)))
+         (if projects
+             (progn
+               (funcall reply "*Open Projects:*")
+               (dolist (p projects)
+                 (funcall reply p)))
+           (funcall reply "No open projects found")))))))
 
 (defun agent-shell-to-go--start-agent-in-folder (folder container-p transport channel)
   "Start an agent in FOLDER, notify CHANNEL via TRANSPORT."
@@ -766,19 +761,17 @@ Here we only handle agent-state reactions."
   (setq agent-shell-to-go--current-agent-message nil)
   (apply orig-fn args))
 
-(cl-defun
- agent-shell-to-go--on-client-initialized
- (&key shell)
- "After-advice for `agent-shell--initialize-client'.  Forward failures."
- (let ((buffer (map-elt agent-shell--state :buffer)))
-   (when (and buffer
-              (buffer-live-p buffer)
-              (buffer-local-value 'agent-shell-to-go-mode buffer)
-              (not (map-elt agent-shell--state :client)))
-     (with-current-buffer buffer
-       (when agent-shell-to-go--thread-id
-         (agent-shell-to-go--send
-          "*Agent failed to start* — check API key / OAuth token"))))))
+(cl-defun agent-shell-to-go--on-client-initialized (&key shell)
+  "After-advice for `agent-shell--initialize-client'.  Forward failures."
+  (let ((buffer (map-elt agent-shell--state :buffer)))
+    (when (and buffer
+               (buffer-live-p buffer)
+               (buffer-local-value 'agent-shell-to-go-mode buffer)
+               (not (map-elt agent-shell--state :client)))
+      (with-current-buffer buffer
+        (when agent-shell-to-go--thread-id
+          (agent-shell-to-go--send
+           "*Agent failed to start* — check API key / OAuth token"))))))
 
 (defun agent-shell-to-go--on-notification (orig-fn &rest args)
   "Advice around `agent-shell--on-notification'.  Mirror updates to transport."
