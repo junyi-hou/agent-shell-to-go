@@ -15,6 +15,9 @@ emacsclient -e '(load-file "/Users/dad/Projects/agent-shell-to-go/agent-shell-to
 agent-shell-to-go.el               shared core + transport protocol
 agent-shell-to-go-slack.el         Slack transport implementation
 agent-shell-to-go-bridge.el        agent-shell integration (transport-agnostic)
+tests/mock-transport.el                    mock transport implementation (no tests)
+tests/agent-shell-to-go-test-core.el       ERT tests for agent-shell-to-go.el
+tests/agent-shell-to-go-test-bridge.el     ERT tests for agent-shell-to-go-bridge.el
 ```
 
 Load order: main → slack → bridge (main provides itself first so
@@ -141,3 +144,17 @@ Remove the reaction to collapse back.
 | `white_check_mark`, `+1` | `permission-allow` | bridge: send permission response |
 | `unlock`, `star` | `permission-always` | bridge: send permission response |
 | `x`, `-1` | `permission-reject` | bridge: send permission response |
+
+## Running Tests
+
+Core tests:
+```bash
+emacsclient -e '(load-file "/Users/dad/Projects/agent-shell-to-go/tests/agent-shell-to-go-test-core.el")'
+emacsclient -e '(ert-run-tests-batch "^agent-shell-to-go-test-core-")'
+```
+
+Bridge integration tests:
+```bash
+emacsclient -e '(load-file "/Users/dad/Projects/agent-shell-to-go/tests/agent-shell-to-go-test-bridge.el")'
+emacsclient -e '(ert-run-tests-batch "^agent-shell-to-go-test-bridge-")'
+```

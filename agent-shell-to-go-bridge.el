@@ -314,40 +314,29 @@ OPTIONS is forwarded to `agent-shell-to-go-transport-send-text'."
 
 (defun agent-shell-to-go--find-option-id (options action)
   "Find option id in OPTIONS matching canonical ACTION symbol."
-  (let ((options-list (append options nil)))
-    (cl-loop
-     for
-     opt
-     in
-     options-list
-     for
-     id
-     =
-     (or (alist-get 'optionId opt) (alist-get 'id opt))
-     for
-     kind
-     =
-     (alist-get 'kind opt)
-     when
-     (pcase action
-       ('permission-allow (member kind '("allow" "accept" "allow_once")))
-       ('permission-always (member kind '("always" "alwaysAllow" "allow_always")))
-       ('permission-reject (member kind '("deny" "reject" "reject_once"))))
-     return
-     id)))
+  (let ((kinds
+         (pcase action
+           ('permission-allow '("allow" "accept" "allow_once"))
+           ('permission-always '("always" "alwaysAllow" "allow_always"))
+           ('permission-reject '("deny" "reject" "reject_once")))))
+    (when-let* ((opt
+                 (seq-find
+                  (lambda (opt) (member (alist-get 'kind opt) kinds))
+                  (append options nil))))
+      (or (alist-get 'optionId opt) (alist-get 'id opt)))))
 
-;;; Set agent mode helper
+; Set agent mode helper 
 
-(defun agent-shell-to-go--set-mode (buffer mode-id mode-name icon)
+(defun agent-shell-to-go--set-mode (buffer mode-id mode-name)
   "Set MODE-ID in BUFFER and notify the thread."
   (with-current-buffer buffer
     (agent-shell--set-default-session-mode
      :shell-buffer (get-buffer buffer)
      :mode-id mode-id
      :on-mode-changed
-     (lambda () (agent-shell-to-go--send (format "%s Mode: *%s*" icon mode-name))))))
+     (lambda () (agent-shell-to-go--send (format "Mode: *%s*" mode-name))))))
 
-;;; !-command handler
+; !-command handler 
 
 (defun agent-shell-to-go--handle-command (text buffer)
   "Handle !-command TEXT in BUFFER.  Return t if handled, nil otherwise."
@@ -355,24 +344,22 @@ OPTIONS is forwarded to `agent-shell-to-go-transport-send-text'."
     (with-current-buffer buffer
       (pcase cmd
         ((or "!yolo" "!bypass")
-         (agent-shell-to-go--set-mode
-          buffer "bypassPermissions" "Bypass Permissions" ":zap:")
+         (agent-shell-to-go--set-mode buffer "bypassPermissions" "Bypass Permissions")
          t)
         ((or "!safe" "!accept" "!acceptedits")
-         (agent-shell-to-go--set-mode buffer "acceptEdits" "Accept Edits" ":shield:")
+         (agent-shell-to-go--set-mode buffer "acceptEdits" "Accept Edits")
          t)
         ((or "!plan" "!planmode")
-         (agent-shell-to-go--set-mode buffer "plan" "Plan" ":clipboard:")
+         (agent-shell-to-go--set-mode buffer "plan" "Plan")
          t)
         ("!mode"
          (let ((mode-id (map-nested-elt agent-shell--state '(:session :mode-id))))
-           (agent-shell-to-go--send
-            (format ":gear: Current mode: *%s*" (or mode-id "unknown"))))
+           (agent-shell-to-go--send (format "Mode: *%s*" (or mode-id "unknown"))))
          t)
         ("!help"
          (agent-shell-to-go--send
           (concat
-           ":question: *Commands:*\n"
+           "*Commands:*\n"
            "`!yolo` — bypass permissions\n"
            "`!safe` — accept edits mode\n"
            "`!plan` — plan mode\n"
@@ -387,13 +374,13 @@ OPTIONS is forwarded to `agent-shell-to-go-transport-send-text'."
         ("!queue"
          (let ((pending (map-elt agent-shell--state :pending-requests)))
            (if (seq-empty-p pending)
-               (agent-shell-to-go--send ":inbox_tray: No pending requests")
+               (agent-shell-to-go--send "No pending requests")
              (agent-shell-to-go--send
-              (format ":inbox_tray: *Pending (%d):*\n%s"
+              (format "*Pending (%d):*\n%s"
                       (length pending)
                       (mapconcat
                        (lambda (r)
-                         (format "• %s" (agent-shell-to-go--truncate-text r 80)))
+                         (format "- %s" (agent-shell-to-go--truncate-text r 80)))
                        pending
                        "\n")))))
          t)
@@ -401,14 +388,14 @@ OPTIONS is forwarded to `agent-shell-to-go-transport-send-text'."
          (let ((count (length (map-elt agent-shell--state :pending-requests))))
            (map-put! agent-shell--state :pending-requests nil)
            (agent-shell-to-go--send
-            (format ":wastebasket: Cleared %d request%s"
+            (format "Cleared %d request%s"
                     count
                     (if (= count 1)
                         ""
                       "s"))))
          t)
         ("!latest"
-         (agent-shell-to-go--send ":point_down:")
+         (agent-shell-to-go--send "↓")
          t)
         ("!debug"
          (let* ((state agent-shell--state)
@@ -425,7 +412,7 @@ OPTIONS is forwarded to `agent-shell-to-go-transport-send-text'."
                      0))))
            (agent-shell-to-go--send
             (format
-             ":bug: *Debug*\nBuffer: `%s`\nThread: `%s`\nChannel: `%s`\nSession: `%s`\nMode: `%s`\nTruncated: %d"
+             "*Debug*\nBuffer: `%s`\nThread: `%s`\nChannel: `%s`\nSession: `%s`\nMode: `%s`\nTruncated: %d"
              (buffer-name buffer)
              agent-shell-to-go--thread-id
              agent-shell-to-go--channel-id
@@ -437,9 +424,9 @@ OPTIONS is forwarded to `agent-shell-to-go-transport-send-text'."
          (condition-case err
              (progn
                (agent-shell-interrupt t)
-               (agent-shell-to-go--send ":stop_sign: Agent interrupted"))
+               (agent-shell-to-go--send "Agent interrupted"))
            (error
-            (agent-shell-to-go--send (format ":x: Stop failed: %s" err))))
+            (agent-shell-to-go--send (format "Stop failed: %s" err))))
          t)
         ("!restart"
          (condition-case err
@@ -455,7 +442,7 @@ OPTIONS is forwarded to `agent-shell-to-go-transport-send-text'."
                           (expand-file-name (concat session-id ".md") transcript-dir)))
                     (has-transcript
                      (and transcript-file (file-exists-p transcript-file))))
-               (agent-shell-to-go--send ":arrows_counterclockwise: Restarting agent…")
+               (agent-shell-to-go--send "Restarting agent…")
                (ignore-errors
                  (agent-shell-interrupt t))
                (run-at-time
@@ -468,66 +455,61 @@ OPTIONS is forwarded to `agent-shell-to-go-transport-send-text'."
                         (run-at-time
                          2 nil
                          (lambda ()
-                           (when-let ((new-buf (car agent-shell-to-go--active-buffers)))
+                           (when-let* ((new-buf
+                                        (car agent-shell-to-go--active-buffers)))
                              (with-current-buffer new-buf
                                (agent-shell-to-go--inject-message
                                 (format "Continue from previous session. Transcript: %s"
                                         transcript-file))))))))))))
            (error
-            (agent-shell-to-go--send (format ":x: Restart failed: %s" err))))
+            (agent-shell-to-go--send (format "Restart failed: %s" err))))
          t)
         (_ nil)))))
 
-;;; Inbound hook handlers (registered on message/reaction/slash hooks)
+; Inbound hook handlers (registered on message/reaction/slash hooks) 
 
-(defun agent-shell-to-go--bridge-on-message (args)
-  "Handle inbound message ARGS plist from a transport."
-  (let* ((transport (plist-get args :transport))
-         (channel (plist-get args :channel))
-         (thread-id (plist-get args :thread-id))
-         (text (plist-get args :text))
-         (buffer
-          (and thread-id
-               (agent-shell-to-go--find-buffer-for-transport-channel-thread
-                transport channel
-                thread-id))))
-    (when buffer
-      (with-current-buffer buffer
-        (if (string-prefix-p "!" text)
-            (agent-shell-to-go--handle-command text buffer)
-          (agent-shell-to-go--inject-message text))))))
+(cl-defun
+ agent-shell-to-go--bridge-on-message
+ (&key transport channel thread-id text &allow-other-keys)
+ "Handle an inbound message from a transport."
+ (let ((buffer
+        (and thread-id
+             (agent-shell-to-go--find-buffer-for-transport-channel-thread
+              transport channel
+              thread-id))))
+   (when buffer
+     (with-current-buffer buffer
+       (if (string-prefix-p "!" text)
+           (agent-shell-to-go--handle-command text buffer)
+         (agent-shell-to-go--inject-message text))))))
 
-(defun agent-shell-to-go--bridge-on-reaction (args)
-  "Handle inbound reaction ARGS plist.
+(cl-defun
+ agent-shell-to-go--bridge-on-reaction
+ (&key transport channel msg-id action added-p &allow-other-keys)
+ "Handle an inbound reaction from a transport.
 Presentation reactions are handled by the main dispatcher registered first.
 Here we only handle agent-state reactions."
-  (let* ((action (plist-get args :action))
-         (added-p (plist-get args :added-p))
-         (transport (plist-get args :transport))
-         (channel (plist-get args :channel))
-         (msg-id (plist-get args :msg-id)))
-    (when added-p
-      (pcase action
-        ('heart
-         (let* ((buffer
-                 (agent-shell-to-go--find-buffer-for-transport-channel-thread
-                  transport channel
-                  nil))
-                (thread-id
-                 (and buffer (buffer-local-value 'agent-shell-to-go--thread-id buffer)))
-                (message-text
-                 (and buffer
-                      (agent-shell-to-go-transport-get-message-text
-                       transport channel msg-id))))
-           (when (and buffer message-text)
-             (with-current-buffer buffer
-               (agent-shell-to-go--inject-message
-                (format "The user heart reacted to: %s" message-text))))))
-        ('bookmark
-         (agent-shell-to-go--handle-bookmark-reaction transport channel msg-id))
-        ((or 'permission-allow 'permission-always 'permission-reject)
-         (agent-shell-to-go--handle-permission-reaction
-          transport channel msg-id action))))))
+ (when added-p
+   (pcase action
+     ('heart
+      (let* ((buffer
+              (agent-shell-to-go--find-buffer-for-transport-channel-thread
+               transport channel
+               nil))
+             (thread-id
+              (and buffer (buffer-local-value 'agent-shell-to-go--thread-id buffer)))
+             (message-text
+              (and buffer
+                   (agent-shell-to-go-transport-get-message-text
+                    transport channel msg-id))))
+        (when (and buffer message-text)
+          (with-current-buffer buffer
+            (agent-shell-to-go--inject-message
+             (format "The user heart reacted to: %s" message-text))))))
+     ('bookmark (agent-shell-to-go--handle-bookmark-reaction transport channel msg-id))
+     ((or 'permission-allow 'permission-always 'permission-reject)
+      (agent-shell-to-go--handle-permission-reaction
+       transport channel msg-id action)))))
 
 (defun agent-shell-to-go--handle-bookmark-reaction (transport channel msg-id)
   "Create an org TODO for MSG-ID in CHANNEL on TRANSPORT."
@@ -568,7 +550,7 @@ Here we only handle agent-state reactions."
        transport
        channel
        (or thread-id msg-id)
-       (format ":bookmark: TODO created: `%s`" (file-name-nondirectory todo-file))))))
+       (format "TODO created: `%s`" (file-name-nondirectory todo-file))))))
 
 (defun agent-shell-to-go--handle-permission-reaction (transport channel msg-id action)
   "Handle a permission reaction ACTION on MSG-ID."
@@ -596,56 +578,52 @@ Here we only handle agent-state reactions."
                      :key #'car
                      :test #'equal)))))))))
 
-(defun agent-shell-to-go--bridge-on-slash-command (args)
-  "Handle inbound slash command ARGS plist."
-  (let* ((transport (plist-get args :transport))
-         (command (plist-get args :command))
-         (typed-args (plist-get args :args))
-         (channel (plist-get args :channel))
-         (interaction-token (plist-get args :interaction-token))
-         (reply
-          (lambda (text)
-            (agent-shell-to-go-transport-send-text transport channel nil text))))
-    (pcase command
-      ("/new-agent" (let* ((folder
-               (expand-file-name
-                (or (plist-get typed-args :folder) agent-shell-to-go-default-folder)))
-              (container-p (plist-get typed-args :container-p)))
-         (agent-shell-to-go--start-agent-in-folder
-          folder container-p transport channel)))
-      ("/new-agent-container" (let ((folder
+(cl-defun
+ agent-shell-to-go--bridge-on-slash-command
+ (&key transport command args channel &allow-other-keys)
+ "Handle an inbound slash command from a transport."
+ (let* ((typed-args args)
+        (reply
+         (lambda (text)
+           (agent-shell-to-go-transport-send-text transport channel nil text))))
+   (pcase command
+     ("/new-agent" (let* ((folder
               (expand-file-name
-               (or (plist-get typed-args :folder) agent-shell-to-go-default-folder))))
-         (agent-shell-to-go--start-agent-in-folder folder t transport channel)))
-      ("/new-project" (let ((project-name (plist-get typed-args :project-name)))
-         (if (not project-name)
-             (funcall reply ":x: Usage: `/new-project <project-name>`")
-           (let ((project-dir
-                  (expand-file-name project-name agent-shell-to-go-projects-directory)))
-             (if (file-exists-p project-dir)
-                 (funcall reply
-                          (format ":warning: Project already exists: `%s`" project-dir))
-               (funcall reply
-                        (format ":file_folder: Creating project: `%s`" project-dir))
-               (let ((start-fn
-                      (lambda (final-dir)
-                        (funcall reply ":rocket: Starting Claude Code…")
-                        (agent-shell-to-go--start-agent-in-folder
-                         final-dir nil transport channel))))
-                 (if agent-shell-to-go-new-project-function
-                     (funcall agent-shell-to-go-new-project-function
-                              project-name
-                              (expand-file-name agent-shell-to-go-projects-directory)
-                              start-fn)
-                   (make-directory project-dir t)
-                   (funcall start-fn project-dir))))))))
-      ("/projects" (let ((projects (agent-shell-to-go--get-open-projects)))
-         (if projects
-             (progn
-               (funcall reply ":file_folder: *Open Projects:*")
-               (dolist (p projects)
-                 (funcall reply p)))
-           (funcall reply ":shrug: No open projects found")))))))
+               (or (plist-get typed-args :folder) agent-shell-to-go-default-folder)))
+             (container-p (plist-get typed-args :container-p)))
+        (agent-shell-to-go--start-agent-in-folder
+         folder container-p transport channel)))
+     ("/new-agent-container" (let ((folder
+             (expand-file-name
+              (or (plist-get typed-args :folder) agent-shell-to-go-default-folder))))
+        (agent-shell-to-go--start-agent-in-folder folder t transport channel)))
+     ("/new-project" (let ((project-name (plist-get typed-args :project-name)))
+        (if (not project-name)
+            (funcall reply "Usage: `/new-project <project-name>`")
+          (let ((project-dir
+                 (expand-file-name project-name agent-shell-to-go-projects-directory)))
+            (if (file-exists-p project-dir)
+                (funcall reply (format "Project already exists: `%s`" project-dir))
+              (funcall reply (format "Creating project: `%s`" project-dir))
+              (let ((start-fn
+                     (lambda (final-dir)
+                       (funcall reply "Starting Claude Code…")
+                       (agent-shell-to-go--start-agent-in-folder
+                        final-dir nil transport channel))))
+                (if agent-shell-to-go-new-project-function
+                    (funcall agent-shell-to-go-new-project-function
+                             project-name
+                             (expand-file-name agent-shell-to-go-projects-directory)
+                             start-fn)
+                  (make-directory project-dir t)
+                  (funcall start-fn project-dir))))))))
+     ("/projects" (let ((projects (agent-shell-to-go--get-open-projects)))
+        (if projects
+            (progn
+              (funcall reply "*Open Projects:*")
+              (dolist (p projects)
+                (funcall reply p)))
+          (funcall reply "No open projects found")))))))
 
 (defun agent-shell-to-go--start-agent-in-folder (folder container-p transport channel)
   "Start an agent in FOLDER, notify CHANNEL via TRANSPORT."
@@ -661,7 +639,7 @@ Here we only handle agent-state reactions."
                            nil))
                 (agent-shell-to-go-transport-send-text
                  transport channel nil
-                 (format ":rocket: Agent started in `%s`%s"
+                 (format "Agent started in `%s`%s"
                          folder
                          (if container-p
                              " (container)"
@@ -669,7 +647,7 @@ Here we only handle agent-state reactions."
             (error
              (agent-shell-to-go--debug "error starting agent: %s" err)))))
     (agent-shell-to-go-transport-send-text
-     transport channel nil (format ":x: Folder does not exist: `%s`" folder))))
+     transport channel nil (format "Folder does not exist: `%s`" folder))))
 
 (defun agent-shell-to-go--get-open-projects ()
   "Return list of currently open project paths."
@@ -755,7 +733,7 @@ Here we only handle agent-state reactions."
                     (agent-shell-to-go-transport-send-text
                      transport channel-id thread-id
                      (format
-                      ":warning: *Permission Required*\n`%s`\n\nReact to approve, deny, or always allow."
+                      "*Permission Required*\n`%s`\n\nReact to approve, deny, or always allow."
                       (or command title "Unknown action")))))
                 (when msg-id
                   (push (cons
@@ -783,7 +761,7 @@ Here we only handle agent-state reactions."
         (agent-shell-to-go--send
          (agent-shell-to-go-transport-format-user-message
           agent-shell-to-go--transport prompt))
-        (agent-shell-to-go--send "_Processing…_"))))
+        (agent-shell-to-go--send "Processing..."))))
   (setq agent-shell-to-go--from-remote nil)
   (setq agent-shell-to-go--current-agent-message nil)
   (apply orig-fn args))
@@ -800,7 +778,7 @@ Here we only handle agent-state reactions."
      (with-current-buffer buffer
        (when agent-shell-to-go--thread-id
          (agent-shell-to-go--send
-          ":rotating_light: *Agent failed to start* — check API key / OAuth token"))))))
+          "*Agent failed to start* — check API key / OAuth token"))))))
 
 (defun agent-shell-to-go--on-notification (orig-fn &rest args)
   "Advice around `agent-shell--on-notification'.  Mirror updates to transport."
@@ -930,8 +908,8 @@ Here we only handle agent-state reactions."
                (when (member status-str '("completed" "failed"))
                  (let ((icon
                         (if (equal status-str "completed")
-                            ":white_check_mark:"
-                          ":x:")))
+                            "[ok]"
+                          "[fail]")))
                    (cond
                     ((and diff-text (> (length diff-text) 0))
                      (let ((full (format "%s\n%s" icon diff-text)))
