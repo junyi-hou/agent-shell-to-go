@@ -128,15 +128,8 @@ Used to translate raw Slack reactions to canonical hook actions."
 
 (defun agent-shell-to-go--slack-emoji-to-action (emoji)
   "Return the canonical action symbol for Slack EMOJI, or nil."
-  (cl-loop
-   for
-   (action . emojis)
-   in
-   agent-shell-to-go-slack-reaction-map
-   when
-   (member emoji emojis)
-   return
-   action))
+  (car (seq-find (lambda (pair) (member emoji (cdr pair)))
+                 agent-shell-to-go-slack-reaction-map)))
 
 ; Struct 
 
@@ -252,15 +245,8 @@ METHOD is GET or POST, ENDPOINT is without the base URL, DATA is the payload."
            "GET" "conversations.list?types=public_channel,private_channel&limit=1000"))
          (channels (alist-get 'channels resp)))
     (when channels
-      (cl-loop
-       for
-       ch
-       across
-       channels
-       when
-       (equal (alist-get 'name ch) name)
-       return
-       (alist-get 'id ch)))))
+      (alist-get 'id (seq-find (lambda (ch) (equal (alist-get 'name ch) name))
+                               channels)))))
 
 (defun agent-shell-to-go--slack-get-or-create-project-channel (transport project-path)
   "Return the Slack channel id for PROJECT-PATH, creating it if necessary."
@@ -302,35 +288,21 @@ METHOD is GET or POST, ENDPOINT is without the base URL, DATA is the payload."
 (defun agent-shell-to-go--slack-format-table-rows (rows)
   "Format ROWS (list of lists of strings) as an aligned text table."
   (let* ((num-cols (apply #'max (mapcar #'length rows)))
-         (col-widths (make-list num-cols 0)))
-    (dolist (row rows)
-      (cl-loop
-       for
-       cell
-       in
-       row
-       for
-       i
-       from
-       0
-       do
-       (setf (nth i col-widths) (max (nth i col-widths) (length cell)))))
+         (col-widths (seq-reduce
+                      (lambda (widths row)
+                        (seq-mapn (lambda (w cell) (max w (length cell))) widths row))
+                      rows
+                      (make-list num-cols 0))))
     (let ((formatted nil)
           (first t))
       (dolist (row rows)
-        (let (cells)
-          (cl-loop
-           for
-           cell
-           in
-           row
-           for
-           width
-           in
-           col-widths
-           do
-           (push (concat cell (make-string (- width (length cell)) ?\s)) cells))
-          (push (concat "  " (mapconcat #'identity (nreverse cells) "   ")) formatted))
+        (push (concat "  "
+                      (mapconcat #'identity
+                                 (seq-mapn (lambda (cell width)
+                                             (concat cell (make-string (- width (length cell)) ?\s)))
+                                           row col-widths)
+                                 "   "))
+              formatted)
         (when first
           (push (concat
                  "  " (mapconcat (lambda (w) (make-string w ?─)) col-widths "   "))
