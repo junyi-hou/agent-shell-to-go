@@ -1,6 +1,6 @@
 # agent-shell-to-go
 
-Emacs package that mirrors agent-shell conversations to remote messaging transports (Slack today; Discord next).
+Emacs package that mirrors agent-shell conversations to remote messaging transports (Slack, Discord).
 
 ## Testing Changes
 
@@ -9,21 +9,26 @@ Reload after editing:
 emacsclient -e '(load-file "/Users/dad/Projects/agent-shell-to-go/agent-shell-to-go.el")'
 ```
 
-## Architecture (three files)
+## Architecture
 
 ```
-agent-shell-to-go.el               shared core + transport protocol
+agent-shell-to-go-core.el          shared protocol: defcustoms, utilities, transport
+                                   struct/generics, registry, hooks, storage, WS machine
 agent-shell-to-go-slack.el         Slack transport implementation
+agent-shell-to-go-discord.el       Discord transport implementation
 agent-shell-to-go-bridge.el        agent-shell integration (transport-agnostic)
-tests/mock-transport.el                    mock transport implementation (no tests)
-tests/agent-shell-to-go-test-core.el       ERT tests for agent-shell-to-go.el
+agent-shell-to-go.el               entry point: minor mode + public API
+tests/mock-transport.el            mock transport implementation (no tests)
+tests/agent-shell-to-go-test-core.el       ERT tests for agent-shell-to-go-core.el
 tests/agent-shell-to-go-test-bridge.el     ERT tests for agent-shell-to-go-bridge.el
 ```
 
-Load order: main → slack → bridge (main provides itself first so
-`(require 'agent-shell-to-go)` in slave files is a no-op).
+Load order: core → slack/discord/bridge → main.
+Slave files `(require 'agent-shell-to-go-core)` directly, so there is no
+circular dependency.  `agent-shell-to-go.el` is the user-facing entry point
+and requires all four in the conventional top-of-file position.
 
-### Transport protocol (cl-defgeneric in main)
+### Transport protocol (cl-defgeneric in core)
 
 All sends/reads/threads/formatting go through generics dispatched on a
 `agent-shell-to-go-transport` struct (a `cl-defstruct`).  Slack and the

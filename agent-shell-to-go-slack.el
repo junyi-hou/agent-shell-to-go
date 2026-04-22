@@ -15,10 +15,7 @@
 
 ;;; Code:
 
-(require 'cl-lib)
-(require 'json)
-(require 'url)
-(require 'websocket)
+(require 'agent-shell-to-go-core)
 
 ; Slack-specific defcustoms 
 

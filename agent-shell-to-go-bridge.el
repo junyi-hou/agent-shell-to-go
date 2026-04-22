@@ -13,7 +13,7 @@
 
 ;;; Code:
 
-(require 'cl-lib)
+(require 'agent-shell-to-go-core)
 
 ; Buffer-local state 
 
