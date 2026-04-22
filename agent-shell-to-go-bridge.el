@@ -1082,34 +1082,6 @@ Here we only handle agent-state reactions."
          (buffer-local-value 'agent-shell-to-go--channel-id buf)
          (memq buf agent-shell-to-go--active-buffers))))
 
-(defun agent-shell-to-go--bridge-send-image (file-path &optional comment buffer)
-  "Send the image at FILE-PATH to BUFFER's transport thread."
-  (let ((buf
-         (or buffer
-             (and (derived-mode-p 'agent-shell-mode)
-                  (buffer-local-value 'agent-shell-to-go-mode (current-buffer))
-                  (current-buffer))
-             (cl-find-if
-              (lambda (b) (and (buffer-live-p b) (get-buffer-window b)))
-              agent-shell-to-go--active-buffers)
-             (car agent-shell-to-go--active-buffers))))
-    (unless buf
-      (user-error "No active agent-shell-to-go session"))
-    (unless (file-exists-p file-path)
-      (user-error "File does not exist: %s" file-path))
-    (unless (agent-shell-to-go--image-file-p file-path)
-      (user-error "Not an image file: %s" file-path))
-    (with-current-buffer buf
-      (unless agent-shell-to-go--thread-id
-        (user-error "No active thread for this session"))
-      (agent-shell-to-go-transport-upload-file
-       agent-shell-to-go--transport
-       agent-shell-to-go--channel-id
-       agent-shell-to-go--thread-id
-       (expand-file-name file-path)
-       (or (and comment (not (string-empty-p comment)) comment)
-           (format ":frame_with_picture: `%s`" (file-name-nondirectory file-path))))
-      (message "Sent image: %s" (file-name-nondirectory file-path)))))
 
 (provide 'agent-shell-to-go-bridge)
 ;;; agent-shell-to-go-bridge.el ends here

@@ -903,28 +903,10 @@ With prefix arg or DRY-RUN non-nil, just report."
   (interactive "P")
   (agent-shell-to-go-cleanup-old-threads nil dry-run))
 
-;;;###autoload
-(defun agent-shell-to-go-send-image (file-path &optional comment buffer)
-  "Send the image at FILE-PATH to BUFFER's transport thread with COMMENT."
-  (interactive (let* ((file (read-file-name "Image file: " nil nil t nil))
-                      (cmt (read-string "Comment (optional): "))
-                      (bufs (agent-shell-to-go--bridge-active-buffers))
-                      (buf
-                       (if (and (not (derived-mode-p 'agent-shell-mode))
-                                (> (length bufs) 1))
-                           (get-buffer
-                            (completing-read
-                             "Send to buffer: " (mapcar #'buffer-name bufs)
-                             nil t))
-                         nil)))
-                 (list file cmt buf)))
-  (declare-function agent-shell-to-go--bridge-send-image "agent-shell-to-go-bridge"
-                    (file-path &optional comment buffer))
-  (agent-shell-to-go--bridge-send-image file-path comment buffer))
+(provide 'agent-shell-to-go)
 
 (require 'agent-shell-to-go-slack)
+(require 'agent-shell-to-go-discord)
 (require 'agent-shell-to-go-bridge)
-
-(provide 'agent-shell-to-go)
 
 ;;; agent-shell-to-go.el ends here
