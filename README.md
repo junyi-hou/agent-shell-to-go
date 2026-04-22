@@ -1,13 +1,6 @@
 # agent-shell-to-go
 
-> **Note:** This project is no longer actively developed. It has been superseded by:
->
-> - [acp-mobile](https://github.com/ElleNajt/acp-mobile) - Mobile frontend
-> - [acp-multiplex](https://github.com/ElleNajt/acp-multiplex) - Multiplexer backend
->
-> There's an [RFD for multiplexing ACP](https://github.com/agentclientprotocol/agent-client-protocol/pull/533); acp-multiplex is an unofficial vibed-out version of it.
->
-> The Slack integration (see commit [`28cc372`](https://github.com/ElleNajt/agent-shell-to-go/tree/28cc372)) should probably be ported to an ACP frontend that integrates with the multiplexer; but it makes the most sense to do that after the RFD is merged and protocol fixed.
+> Forked from [ElleNajt's repo](https://github.com/ElleNajt/agent-shell-to-go) and extend to support Slack + Discord.
 
 Take your [agent-shell](https://github.com/xenodium/agent-shell) sessions anywhere. Chat with your AI agents from your phone or any device.
 
@@ -23,10 +16,10 @@ agent-shell-to-go mirrors your agent-shell conversations to external messaging p
 
 Currently supported:
 - **Slack** (via Socket Mode)
+- **Discord** (via Discord Gateway)
 
 Planned/possible integrations:
 - Matrix
-- Discord
 - Telegram
 
 ## Features
@@ -56,9 +49,9 @@ Planned/possible integrations:
 - [x] Per-project channels - each project gets its own Slack channel automatically
 - [x] Message queuing - messages sent while agent is busy are queued automatically
 - [x] Three-state message expansion - collapsed (icon only), glance (👀, ~500 chars), full read (📖)
+- [x] Discord integration
 - [ ] Cloudflare Worker relay - Slack's Socket Mode requires your laptop to be online; when it sleeps or loses WiFi, Slack accumulates delivery failures and eventually disables the app. A Cloudflare Worker relay would maintain the Slack Socket Mode connection 24/7, queue messages while you're offline, and forward them when Emacs reconnects.
 - [ ] Matrix integration
-- [ ] Discord integration
 - [ ] Telegram integration
 
 ## Related Projects
