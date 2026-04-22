@@ -46,6 +46,7 @@ Planned/possible integrations:
 ## Setup
 
 - [Slack setup](docs/slack-setup.md) — app creation, credentials, usage, reactions, troubleshooting
+- [Discord setup](docs/discord-bot-setup.md) — bot creation, permissions, forum channels, custom emojis
 
 ## Roadmap
 
