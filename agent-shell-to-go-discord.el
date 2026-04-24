@@ -161,7 +161,7 @@ Returns the parsed JSON response or nil."
          (args (list "-s" "-X" method
                      "-H" (concat "Authorization: Bot " token)
                      "-H" "Content-Type: application/json"
-                     "-H" "User-Agent: DiscordBot (agent-shell-to-go, 0.3.0)")))
+                     "-H" "User-Agent: DiscordBot (agent-shell-to-go, 0.3.1)")))
     (when data
       (setq args
             (append args
@@ -185,7 +185,7 @@ Returns the parsed JSON response or nil."
          (filename (file-name-nondirectory path))
          (args (list "-s" "-X" "POST"
                      "-H" (concat "Authorization: Bot " token)
-                     "-H" "User-Agent: DiscordBot (agent-shell-to-go, 0.3.0)"
+                     "-H" "User-Agent: DiscordBot (agent-shell-to-go, 0.3.1)"
                      "-F" (format "files[0]=@%s;filename=%s" path filename))))
     (when (and comment (not (string-empty-p comment)))
       (setq args (append args (list "-F" (format "content=%s" comment)))))

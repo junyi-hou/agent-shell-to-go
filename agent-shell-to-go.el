@@ -4,7 +4,7 @@
 
 ;; Author: Elle Najt
 ;; URL: https://github.com/ElleNajt/agent-shell-to-go
-;; Version: 0.3.0
+;; Version: 0.3.1
 ;; Package-Requires: ((emacs "29.1") (agent-shell "0.50.1") (websocket "1.14"))
 ;; Keywords: convenience, tools, ai
 
