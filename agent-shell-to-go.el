@@ -5,7 +5,7 @@
 ;; Author: Elle Najt
 ;; URL: https://github.com/ElleNajt/agent-shell-to-go
 ;; Version: 0.3.0
-;; Package-Requires: ((emacs "29.1") (agent-shell "0.33.1") (websocket "1.14"))
+;; Package-Requires: ((emacs "29.1") (agent-shell "0.50.1") (websocket "1.14"))
 ;; Keywords: convenience, tools, ai
 
 ;; This file is not part of GNU Emacs.
@@ -59,7 +59,8 @@
   "Mirror agent-shell conversations to a remote transport.
 Take your AI agent sessions anywhere — chat from your phone!"
   :lighter " ToGo"
-  :group 'agent-shell-to-go
+  :group
+  'agent-shell-to-go
   (if agent-shell-to-go-mode
       (agent-shell-to-go--bridge-enable)
     (agent-shell-to-go--bridge-disable)))
@@ -95,7 +96,8 @@ before any local agent starts."
 
 (declare-function agent-shell-to-go--bridge-reconnect-buffer "agent-shell-to-go-bridge"
                   (&optional buffer))
-(declare-function agent-shell-to-go--bridge-buffer-connected-p "agent-shell-to-go-bridge"
+(declare-function agent-shell-to-go--bridge-buffer-connected-p
+                  "agent-shell-to-go-bridge"
                   (&optional buffer))
 (declare-function agent-shell-to-go--bridge-thread-active-p "agent-shell-to-go-bridge"
                   (transport channel thread-id))
@@ -138,11 +140,13 @@ connected, nil on failure."
   (let ((connected 0)
         (already 0)
         (failed 0)
-        (bufs (cl-remove-if-not
-               (lambda (b)
-                 (and (buffer-live-p b)
-                      (with-current-buffer b (derived-mode-p 'agent-shell-mode))))
-               (buffer-list))))
+        (bufs
+         (cl-remove-if-not
+          (lambda (b)
+            (and (buffer-live-p b)
+                 (with-current-buffer b
+                   (derived-mode-p 'agent-shell-mode))))
+          (buffer-list))))
     (dolist (buf bufs)
       (pcase (agent-shell-to-go-ensure-connected buf)
         ('t (cl-incf already))
@@ -150,7 +154,9 @@ connected, nil on failure."
         (_ (cl-incf failed))))
     (when (or (> connected 0) (> failed 0))
       (message "agent-shell-to-go: %d newly connected, %d already, %d failed"
-               connected already failed))))
+               connected
+               already
+               failed))))
 
 (defvar agent-shell-to-go--ensure-timer nil
   "Timer for periodic connection checks.")
@@ -179,11 +185,13 @@ INTERVAL is seconds between checks (default 60)."
   "Reconnect all agent-shell buffers to their transports (new threads)."
   (interactive)
   (let ((reconnected 0)
-        (bufs (cl-remove-if-not
-               (lambda (b)
-                 (and (buffer-live-p b)
-                      (with-current-buffer b (derived-mode-p 'agent-shell-mode))))
-               (buffer-list))))
+        (bufs
+         (cl-remove-if-not
+          (lambda (b)
+            (and (buffer-live-p b)
+                 (with-current-buffer b
+                   (derived-mode-p 'agent-shell-mode))))
+          (buffer-list))))
     (dolist (buf bufs)
       (condition-case err
           (progn
@@ -204,20 +212,23 @@ Reports to the *Agent Shell Threads* buffer."
       (erase-buffer)
       (dolist (transport (agent-shell-to-go--active-transport-objects))
         (let* ((name (agent-shell-to-go-transport-name transport))
-               (channel (or channel-id
-                            (ignore-errors
-                              (agent-shell-to-go-transport-ensure-project-channel
-                               transport default-directory)))))
+               (channel
+                (or channel-id
+                    (ignore-errors
+                      (agent-shell-to-go-transport-ensure-project-channel
+                       transport default-directory)))))
           (when channel
-            (let ((threads (ignore-errors
-                             (agent-shell-to-go-transport-list-threads transport channel))))
+            (let ((threads
+                   (ignore-errors
+                     (agent-shell-to-go-transport-list-threads transport channel))))
               (insert (format "=== %s :: %s ===\n" name channel))
               (if (not threads)
                   (insert "(no threads)\n\n")
-                (dolist (thread (sort threads
-                                      (lambda (a b)
-                                        (> (or (plist-get a :last-timestamp) 0)
-                                           (or (plist-get b :last-timestamp) 0)))))
+                (dolist (thread
+                         (sort threads
+                               (lambda (a b)
+                                 (> (or (plist-get a :last-timestamp) 0)
+                                    (or (plist-get b :last-timestamp) 0)))))
                   (let* ((ts (plist-get thread :thread-id))
                          (last (or (plist-get thread :last-timestamp) 0))
                          (age-h (/ (- now last) 3600.0)))
@@ -238,34 +249,42 @@ Signal prefix arg or DRY-RUN to only report."
         (total-skipped-active 0)
         (total-skipped-recent 0))
     (dolist (transport (agent-shell-to-go--active-transport-objects))
-      (let* ((channel (or channel-id
-                          (ignore-errors
-                            (agent-shell-to-go-transport-ensure-project-channel
-                             transport default-directory))))
-             (threads (and channel
-                           (ignore-errors
-                             (agent-shell-to-go-transport-list-threads transport channel))))
+      (let* ((channel
+              (or channel-id
+                  (ignore-errors
+                    (agent-shell-to-go-transport-ensure-project-channel
+                     transport default-directory))))
+             (threads
+              (and channel
+                   (ignore-errors
+                     (agent-shell-to-go-transport-list-threads transport channel))))
              (to-delete nil))
         (dolist (thread threads)
           (let* ((ts (plist-get thread :thread-id))
                  (last (or (plist-get thread :last-timestamp) 0))
                  (age (- now last))
-                 (active-p (agent-shell-to-go--bridge-thread-active-p
-                            transport channel ts)))
+                 (active-p
+                  (agent-shell-to-go--bridge-thread-active-p transport channel ts)))
             (cond
-             (active-p (cl-incf total-skipped-active))
-             ((< age threshold-secs) (cl-incf total-skipped-recent))
-             (t (push ts to-delete)))))
+             (active-p
+              (cl-incf total-skipped-active))
+             ((< age threshold-secs)
+              (cl-incf total-skipped-recent))
+             (t
+              (push ts to-delete)))))
         (when (and to-delete (not dry-run))
           (dolist (thread-id to-delete)
             (condition-case err
                 (progn
-                  (agent-shell-to-go-transport-delete-thread transport channel thread-id)
+                  (agent-shell-to-go-transport-delete-thread
+                   transport channel thread-id)
                   (cl-incf total-deleted))
               (error
                (agent-shell-to-go--debug "delete-thread failed: %s" err)))))))
     (message "agent-shell-to-go cleanup: %s %d threads (active %d, recent %d)"
-             (if dry-run "would delete" "deleted")
+             (if dry-run
+                 "would delete"
+               "deleted")
              total-deleted total-skipped-active total-skipped-recent)))
 
 ;;;###autoload
