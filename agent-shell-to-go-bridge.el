@@ -33,7 +33,13 @@
   "Non-nil after the thread header has been updated with a session title.")
 
 (defvar-local agent-shell-to-go--turn-complete-subscription nil
-  "Subscription token for the turn-complete event.")
+  "Subscription token for the turn-complete event (session title fetch).")
+
+(defvar-local agent-shell-to-go--ready-subscription nil
+  "Subscription token for flushing agent message and sending ready signal.")
+
+(defvar-local agent-shell-to-go--tool-call-update-subscription nil
+  "Subscription token for tool-call-update events.")
 
 (defvar-local agent-shell-to-go--file-watcher nil
   "The fswatch process watching the project directory.")
@@ -774,7 +780,7 @@ Here we only handle agent-state reactions."
            "*Agent failed to start* — check API key / OAuth token"))))))
 
 (defun agent-shell-to-go--on-notification (orig-fn &rest args)
-  "Advice around `agent-shell--on-notification'.  Mirror updates to transport."
+  "Advice around `agent-shell--on-notification'.  Accumulate agent message chunks."
   (let* ((state (plist-get args :state))
          (buffer (alist-get :buffer state)))
     (when (and buffer
@@ -783,170 +789,124 @@ Here we only handle agent-state reactions."
       (let* ((notification (plist-get args :acp-notification))
              (params (alist-get 'params notification))
              (update (alist-get 'update params))
-             (update-type (alist-get 'sessionUpdate update))
-             (transport (buffer-local-value 'agent-shell-to-go--transport buffer))
              (thread-id (buffer-local-value 'agent-shell-to-go--thread-id buffer)))
-        (when (and thread-id transport)
-          (pcase update-type
-            ("agent_message_chunk"
-             (let ((text (alist-get 'text (alist-get 'content update))))
-               (with-current-buffer buffer
-                 (setq agent-shell-to-go--current-agent-message
-                       (concat agent-shell-to-go--current-agent-message text)))))
-
-            ("tool_call"
-             (with-current-buffer buffer
-               ;; Flush pending agent text first to preserve ordering
-               (when (and agent-shell-to-go--current-agent-message
-                          (> (length agent-shell-to-go--current-agent-message) 0))
-                 (agent-shell-to-go--send
-                  (agent-shell-to-go-transport-format-agent-message
-                   transport agent-shell-to-go--current-agent-message))
-                 (setq agent-shell-to-go--current-agent-message nil))
-               ;; Record mentioned file paths for image uploads
-               (dolist (path (agent-shell-to-go--extract-file-paths-from-update update))
-                 (agent-shell-to-go--record-mentioned-file path))
-               (unless agent-shell-to-go--tool-calls
-                 (setq agent-shell-to-go--tool-calls (make-hash-table :test 'equal))))
-             (let* ((tool-call-id (alist-get 'toolCallId update))
-                    (title (alist-get 'title update))
-                    (raw-input (alist-get 'rawInput update))
-                    (command (alist-get 'command raw-input))
-                    (file-path (alist-get 'file_path raw-input))
-                    (query (alist-get 'query raw-input))
-                    (url (alist-get 'url raw-input))
-                    (specific (or command file-path query url))
-                    (title-has-specific
-                     (and title
-                          specific
-                          (string-match-p (regexp-quote specific) title)))
-                    (display
-                     (cond
-                      (command
-                       command)
-                      (title-has-specific
-                       title)
-                      ((and file-path title)
-                       (format "%s: %s" title file-path))
-                      ((and query title)
-                       (format "%s: %s" title query))
-                      ((and url title)
-                       (format "%s: %s" title url))
-                      (specific
-                       specific)
-                      (t
-                       title)))
-                    (diff (agent-shell-to-go--extract-diff update))
-                    (diff-text
-                     (and diff
-                          (agent-shell-to-go-transport-format-diff
-                           transport (car diff) (cdr diff))))
-                    (already-sent
-                     (and tool-call-id
-                          (with-current-buffer buffer
-                            (gethash tool-call-id agent-shell-to-go--tool-calls)))))
-               (when (and specific (not already-sent))
-                 (with-current-buffer buffer
-                   (puthash tool-call-id t agent-shell-to-go--tool-calls))
-                 (condition-case err
-                     (if (and diff-text (> (length diff-text) 0))
-                         (agent-shell-to-go--send
-                          (format "%s\n%s"
-                                  (agent-shell-to-go-transport-format-tool-call-start
-                                   transport display)
-                                  diff-text)
-                          '(:truncate t))
-                       (agent-shell-to-go--send
-                        (agent-shell-to-go-transport-format-tool-call-start
-                         transport display)
-                        '(:truncate t)))
-                   (error
-                    (agent-shell-to-go--debug "tool_call send error: %s" err))))))
-
-            ("tool_call_update"
-             (with-current-buffer buffer
-               (dolist (path (agent-shell-to-go--extract-file-paths-from-update update))
-                 (agent-shell-to-go--record-mentioned-file path)))
-             (let* ((status-str (alist-get 'status update))
-                    (status (intern (or status-str "unknown")))
-                    (content (alist-get 'content update))
-                    (content-text
-                     (and content
-                          (mapconcat (lambda (item)
-                                       (or (alist-get 'text (alist-get 'content item))
-                                           (alist-get 'text item)
-                                           ""))
-                                     (if (vectorp content)
-                                         (append content nil)
-                                       (if (listp content)
-                                           content
-                                         nil))
-                                     "\n")))
-                    (output
-                     (or (alist-get 'rawOutput update)
-                         (alist-get 'output update)
-                         content-text))
-                    (diff
-                     (condition-case nil
-                         (agent-shell-to-go--extract-diff update)
-                       (error
-                        nil)))
-                    (diff-text
-                     (and diff
-                          (condition-case nil
-                              (agent-shell-to-go-transport-format-diff
-                               transport (car diff) (cdr diff))
-                            (error
-                             nil)))))
-               (when (member status-str '("completed" "failed"))
-                 (let ((icon
-                        (if (equal status-str "completed")
-                            "[ok]"
-                          "[fail]")))
-                   (cond
-                    ((and diff-text (> (length diff-text) 0))
-                     (let ((full (format "%s\n%s" icon diff-text)))
-                       (if agent-shell-to-go-show-tool-output
-                           (agent-shell-to-go--send full '(:truncate t))
-                         (let ((msg-id (agent-shell-to-go--send icon)))
-                           (when msg-id
-                             (with-current-buffer buffer
-                               (agent-shell-to-go--save-truncated-message
-                                transport
-                                agent-shell-to-go--channel-id
-                                msg-id
-                                full
-                                icon)))))))
-                    ((and output (stringp output) (> (length output) 0))
-                     (let ((full
-                            (agent-shell-to-go-transport-format-tool-call-result
-                             transport "output" status output)))
-                       (if agent-shell-to-go-show-tool-output
-                           (agent-shell-to-go--send full '(:truncate t))
-                         (let ((msg-id (agent-shell-to-go--send icon)))
-                           (when msg-id
-                             (with-current-buffer buffer
-                               (agent-shell-to-go--save-truncated-message
-                                transport
-                                agent-shell-to-go--channel-id
-                                msg-id
-                                full
-                                icon)))))))
-                    (t
-                     (agent-shell-to-go--send icon)))))))))))
-    (apply orig-fn args)))
-
-(defun agent-shell-to-go--on-heartbeat-stop (orig-fn &rest args)
-  "Advice around `agent-shell-heartbeat-stop'.  Flush and signal readiness."
-  (when (and agent-shell-to-go-mode agent-shell-to-go--thread-id)
-    (when (and agent-shell-to-go--current-agent-message
-               (> (length agent-shell-to-go--current-agent-message) 0))
-      (agent-shell-to-go--send
-       (agent-shell-to-go-transport-format-agent-message
-        agent-shell-to-go--transport agent-shell-to-go--current-agent-message))
-      (setq agent-shell-to-go--current-agent-message nil))
-    (agent-shell-to-go--send "_Ready for input_"))
+        (when (and thread-id
+                   (equal (alist-get 'sessionUpdate update) "agent_message_chunk"))
+          (let ((text (alist-get 'text (alist-get 'content update))))
+            (with-current-buffer buffer
+              (setq agent-shell-to-go--current-agent-message
+                    (concat agent-shell-to-go--current-agent-message text))))))))
   (apply orig-fn args))
+
+(defun agent-shell-to-go--bridge-on-tool-call-update (event)
+  "Handle a tool-call-update EVENT from agent-shell.
+Fires synchronously from within `agent-shell--on-notification', so
+buffer-local variables for the shell buffer are in scope."
+  (when (and agent-shell-to-go-mode agent-shell-to-go--thread-id)
+    (let* ((data (map-elt event :data))
+           (tool-call-id (map-elt data :tool-call-id))
+           (tool-call (map-elt data :tool-call))
+           (status (map-elt tool-call :status))
+           (raw-input (map-elt tool-call :raw-input))
+           (content (map-elt tool-call :content))
+           (pseudo-update `((rawInput . ,raw-input) (content . ,content))))
+      (dolist (path (agent-shell-to-go--extract-file-paths-from-update pseudo-update))
+        (agent-shell-to-go--record-mentioned-file path))
+      (if (member status '("completed" "failed"))
+          (let* ((content-text
+                  (and content
+                       (mapconcat (lambda (item)
+                                    (or (alist-get 'text (alist-get 'content item))
+                                        (alist-get 'text item)
+                                        ""))
+                                  (if (vectorp content) (append content nil)
+                                    (if (listp content) content nil))
+                                  "\n")))
+                 (output content-text)
+                 (diff (condition-case nil
+                           (agent-shell-to-go--extract-diff pseudo-update)
+                         (error nil)))
+                 (diff-text
+                  (and diff
+                       (condition-case nil
+                           (agent-shell-to-go-transport-format-diff
+                            agent-shell-to-go--transport (car diff) (cdr diff))
+                         (error nil))))
+                 (icon (if (equal status "completed") "[ok]" "[fail]")))
+            (cond
+             ((and diff-text (> (length diff-text) 0))
+              (let ((full (format "%s\n%s" icon diff-text)))
+                (if agent-shell-to-go-show-tool-output
+                    (agent-shell-to-go--send full '(:truncate t))
+                  (let ((msg-id (agent-shell-to-go--send icon)))
+                    (when msg-id
+                      (agent-shell-to-go--save-truncated-message
+                       agent-shell-to-go--transport
+                       agent-shell-to-go--channel-id
+                       msg-id full icon))))))
+             ((and output (stringp output) (> (length output) 0))
+              (let ((full (agent-shell-to-go-transport-format-tool-call-result
+                           agent-shell-to-go--transport "output" status output)))
+                (if agent-shell-to-go-show-tool-output
+                    (agent-shell-to-go--send full '(:truncate t))
+                  (let ((msg-id (agent-shell-to-go--send icon)))
+                    (when msg-id
+                      (agent-shell-to-go--save-truncated-message
+                       agent-shell-to-go--transport
+                       agent-shell-to-go--channel-id
+                       msg-id full icon))))))
+             (t (agent-shell-to-go--send icon))))
+        ;; Tool call started — flush any buffered agent text first, then notify
+        (unless agent-shell-to-go--tool-calls
+          (setq agent-shell-to-go--tool-calls (make-hash-table :test 'equal)))
+        (let* ((title (map-elt tool-call :title))
+               (command (alist-get 'command raw-input))
+               (file-path (alist-get 'file_path raw-input))
+               (query (alist-get 'query raw-input))
+               (url (alist-get 'url raw-input))
+               (specific (or command file-path query url))
+               (already-sent (and tool-call-id
+                                  (gethash tool-call-id agent-shell-to-go--tool-calls))))
+          (when (and specific (not already-sent))
+            (when (and agent-shell-to-go--current-agent-message
+                       (> (length agent-shell-to-go--current-agent-message) 0))
+              (agent-shell-to-go--send
+               (agent-shell-to-go-transport-format-agent-message
+                agent-shell-to-go--transport agent-shell-to-go--current-agent-message))
+              (setq agent-shell-to-go--current-agent-message nil))
+            (puthash tool-call-id t agent-shell-to-go--tool-calls)
+            (let* ((title-has-specific
+                    (and title specific (string-match-p (regexp-quote specific) title)))
+                   (display
+                    (cond
+                     (command command)
+                     (title-has-specific title)
+                     ((and file-path title) (format "%s: %s" title file-path))
+                     ((and query title) (format "%s: %s" title query))
+                     ((and url title) (format "%s: %s" title url))
+                     (specific specific)
+                     (t title)))
+                   (diff (condition-case nil
+                             (agent-shell-to-go--extract-diff pseudo-update)
+                           (error nil)))
+                   (diff-text
+                    (and diff
+                         (agent-shell-to-go-transport-format-diff
+                          agent-shell-to-go--transport (car diff) (cdr diff)))))
+              (condition-case err
+                  (if (and diff-text (> (length diff-text) 0))
+                      (agent-shell-to-go--send
+                       (format "%s\n%s"
+                               (agent-shell-to-go-transport-format-tool-call-start
+                                agent-shell-to-go--transport display)
+                               diff-text)
+                       '(:truncate t))
+                    (agent-shell-to-go--send
+                     (agent-shell-to-go-transport-format-tool-call-start
+                      agent-shell-to-go--transport display)
+                     '(:truncate t)))
+                (error (agent-shell-to-go--debug "tool_call send error: %s" err))))))))))
+
 
 ; Hook registration 
 
@@ -981,9 +941,6 @@ Here we only handle agent-state reactions."
      :around #'agent-shell-to-go--on-notification)
     (advice-add 'agent-shell--on-request :around #'agent-shell-to-go--on-request)
     (advice-add
-     'agent-shell-heartbeat-stop
-     :around #'agent-shell-to-go--on-heartbeat-stop)
-    (advice-add
      'agent-shell--initialize-client
      :after #'agent-shell-to-go--on-client-initialized)
     ;; Subscribe to turn-complete for session title
@@ -993,6 +950,28 @@ Here we only handle agent-state reactions."
            :event 'turn-complete
            :on-event
            (lambda (_event) (agent-shell-to-go--fetch-session-title))))
+    ;; Subscribe to turn-complete for flush + ready signal
+    (setq agent-shell-to-go--ready-subscription
+          (agent-shell-subscribe-to
+           :shell-buffer (current-buffer)
+           :event 'turn-complete
+           :on-event
+           (lambda (_event)
+             (when agent-shell-to-go-mode
+               (when (and agent-shell-to-go--current-agent-message
+                          (> (length agent-shell-to-go--current-agent-message) 0))
+                 (agent-shell-to-go--send
+                  (agent-shell-to-go-transport-format-agent-message
+                   agent-shell-to-go--transport agent-shell-to-go--current-agent-message))
+                 (setq agent-shell-to-go--current-agent-message nil))
+               (when agent-shell-to-go--thread-id
+                 (agent-shell-to-go--send "_Ready for input_"))))))
+    ;; Subscribe to tool-call-update for tool call mirroring
+    (setq agent-shell-to-go--tool-call-update-subscription
+          (agent-shell-subscribe-to
+           :shell-buffer (current-buffer)
+           :event 'tool-call-update
+           :on-event #'agent-shell-to-go--bridge-on-tool-call-update))
     ;; Start file watcher
     (agent-shell-to-go--start-file-watcher)
     ;; Kill hook
@@ -1009,11 +988,13 @@ Here we only handle agent-state reactions."
   "Disable transport mirroring for this buffer."
   (remove-hook 'kill-buffer-hook #'agent-shell-to-go--on-buffer-kill t)
   (agent-shell-to-go--stop-file-watcher)
-  (when agent-shell-to-go--turn-complete-subscription
-    (ignore-errors
-      (agent-shell-unsubscribe
-       :subscription agent-shell-to-go--turn-complete-subscription))
-    (setq agent-shell-to-go--turn-complete-subscription nil))
+  (dolist (sub (list agent-shell-to-go--turn-complete-subscription
+                     agent-shell-to-go--ready-subscription
+                     agent-shell-to-go--tool-call-update-subscription))
+    (when sub (ignore-errors (agent-shell-unsubscribe :subscription sub))))
+  (setq agent-shell-to-go--turn-complete-subscription nil
+        agent-shell-to-go--ready-subscription nil
+        agent-shell-to-go--tool-call-update-subscription nil)
   (when (and agent-shell-to-go--thread-id agent-shell-to-go--transport)
     (when (and agent-shell-to-go-upload-transcript-on-end
                (bound-and-true-p agent-shell--transcript-file)
@@ -1031,7 +1012,6 @@ Here we only handle agent-state reactions."
     (advice-remove 'agent-shell--send-command #'agent-shell-to-go--on-send-command)
     (advice-remove 'agent-shell--on-notification #'agent-shell-to-go--on-notification)
     (advice-remove 'agent-shell--on-request #'agent-shell-to-go--on-request)
-    (advice-remove 'agent-shell-heartbeat-stop #'agent-shell-to-go--on-heartbeat-stop)
     (advice-remove
      'agent-shell--initialize-client #'agent-shell-to-go--on-client-initialized))
   (agent-shell-to-go--debug "bridge disabled"))
@@ -1066,9 +1046,37 @@ Here we only handle agent-state reactions."
          'agent-shell--on-notification
          :around #'agent-shell-to-go--on-notification)
         (advice-add 'agent-shell--on-request :around #'agent-shell-to-go--on-request)
-        (advice-add
-         'agent-shell-heartbeat-stop
-         :around #'agent-shell-to-go--on-heartbeat-stop)
+        ;; Refresh subscriptions for the new thread
+        (dolist (sub (list agent-shell-to-go--turn-complete-subscription
+                           agent-shell-to-go--ready-subscription
+                           agent-shell-to-go--tool-call-update-subscription))
+          (when sub (ignore-errors (agent-shell-unsubscribe :subscription sub))))
+        (setq agent-shell-to-go--turn-complete-subscription
+              (agent-shell-subscribe-to
+               :shell-buffer buf
+               :event 'turn-complete
+               :on-event
+               (lambda (_event) (agent-shell-to-go--fetch-session-title))))
+        (setq agent-shell-to-go--ready-subscription
+              (agent-shell-subscribe-to
+               :shell-buffer buf
+               :event 'turn-complete
+               :on-event
+               (lambda (_event)
+                 (when agent-shell-to-go-mode
+                   (when (and agent-shell-to-go--current-agent-message
+                              (> (length agent-shell-to-go--current-agent-message) 0))
+                     (agent-shell-to-go--send
+                      (agent-shell-to-go-transport-format-agent-message
+                       agent-shell-to-go--transport agent-shell-to-go--current-agent-message))
+                     (setq agent-shell-to-go--current-agent-message nil))
+                   (when agent-shell-to-go--thread-id
+                     (agent-shell-to-go--send "_Ready for input_"))))))
+        (setq agent-shell-to-go--tool-call-update-subscription
+              (agent-shell-subscribe-to
+               :shell-buffer buf
+               :event 'tool-call-update
+               :on-event #'agent-shell-to-go--bridge-on-tool-call-update))
         (add-hook 'kill-buffer-hook #'agent-shell-to-go--on-buffer-kill nil t)
         (unless agent-shell-to-go-mode
           (setq agent-shell-to-go-mode t))
