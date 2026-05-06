@@ -108,8 +108,7 @@ Keys read: SLACK_BOT_TOKEN, SLACK_APP_TOKEN, SLACK_CHANNEL_ID, SLACK_USER_ID."
     (expand-full . ("book" "open_book"))
     (permission-allow . ("white_check_mark" "+1"))
     (permission-always . ("unlock" "star"))
-    (permission-reject . ("x" "-1"))
-    (bookmark . ("bookmark")))
+    (permission-reject . ("x" "-1")))
   "Map canonical action symbols to lists of Slack emoji names.
 Used to translate raw Slack reactions to canonical hook actions."
   :type '(alist :key-type symbol :value-type (repeat string))

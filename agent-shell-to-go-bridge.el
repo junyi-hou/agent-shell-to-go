@@ -348,80 +348,30 @@ OPTIONS is forwarded to `agent-shell-to-go-transport-send-text'."
 
 (cl-defun agent-shell-to-go--bridge-on-reaction
     (&key transport channel-id msg-id action added-p &allow-other-keys)
-  "Handle an inbound reaction from a transport.
-Presentation reactions are handled by the main dispatcher registered first.
-Here we only handle agent-state reactions."
-  (when added-p
-    (pcase action
-      ('bookmark (agent-shell-to-go--handle-bookmark-reaction transport channel msg-id))
-      ((or 'permission-allow 'permission-always 'permission-reject)
-       (agent-shell-to-go--handle-permission-reaction
-        transport channel msg-id action)))))
-
-(defun agent-shell-to-go--handle-bookmark-reaction (transport channel msg-id)
-  "Create an org TODO for MSG-ID in CHANNEL on TRANSPORT."
-  (let* ((buffer
-          (agent-shell-to-go--find-buffer-for-transport-channel-thread transport channel
-                                                                       nil))
-         (thread-id
-          (and buffer (buffer-local-value 'agent-shell-to-go--thread-id buffer)))
-         (message-text
-          (agent-shell-to-go-transport-get-message-text transport channel msg-id))
-         (project-name
-          (or (and buffer
-                   (with-current-buffer buffer
-                     (file-name-nondirectory (directory-file-name default-directory))))
-              "slack"))
-         (today (format-time-string "%Y-%m-%d"))
-         (timestamp (format-time-string "%Y%m%d-%H%M%S"))
-         (todo-dir (expand-file-name agent-shell-to-go-todo-directory))
-         (todo-file
-          (expand-file-name (format "%s-%s.org" project-name timestamp) todo-dir))
-         (title-text
-          (if message-text
-              (let ((first-line (car (split-string message-text "\n" t))))
-                (if (> (length first-line) 60)
-                    (concat (substring first-line 0 57) "…")
-                  first-line))
-            "Bookmarked message")))
-    (when message-text
-      (make-directory todo-dir t)
-      (with-temp-file todo-file
-        (insert
-         (format "* TODO %s\nSCHEDULED: <%s>\n\nProject: %s\n\n** Message\n%s\n"
-                 title-text
-                 today
-                 project-name
-                 message-text)))
-      (agent-shell-to-go-transport-send-text
-       transport
-       channel
-       (or thread-id msg-id)
-       (format "TODO created: `%s`" (file-name-nondirectory todo-file))))))
-
-(defun agent-shell-to-go--handle-permission-reaction (transport channel msg-id action)
-  "Handle a permission reaction ACTION on MSG-ID."
-  (let* ((key (list (agent-shell-to-go-transport-name transport) channel msg-id))
-         (pending (assoc key agent-shell-to-go--pending-permissions #'equal)))
-    (when pending
-      (let* ((info (cdr pending))
-             (request-id (plist-get info :request-id))
-             (buffer (plist-get info :buffer))
-             (options (plist-get info :options)))
-        (when (and buffer (buffer-live-p buffer))
-          (let ((option-id (agent-shell-to-go--find-option-id options action)))
-            (when option-id
-              (with-current-buffer buffer
-                (let ((state agent-shell--state))
-                  (agent-shell--send-permission-response
-                   :client (alist-get :client state)
-                   :request-id request-id
-                   :option-id option-id
-                   :state state)))
-              (setq agent-shell-to-go--pending-permissions
-                    (cl-remove key agent-shell-to-go--pending-permissions
-                               :key #'car
-                               :test #'equal)))))))))
+  "Handle permission reactions from a transport.
+Presentation reactions are handled by the main dispatcher registered first."
+  (when (and added-p
+             (memq action '(permission-allow permission-always permission-reject)))
+    (let* ((key (list (agent-shell-to-go-transport-name transport) channel-id msg-id))
+           (pending (assoc key agent-shell-to-go--pending-permissions #'equal)))
+      (when pending
+        (let* ((info (cdr pending))
+               (request-id (plist-get info :request-id))
+               (buffer (plist-get info :buffer))
+               (options (plist-get info :options))
+               (option-id (agent-shell-to-go--find-option-id options action)))
+          (when (and buffer (buffer-live-p buffer) option-id)
+            (with-current-buffer buffer
+              (let ((state agent-shell--state))
+                (agent-shell--send-permission-response
+                 :client (alist-get :client state)
+                 :request-id request-id
+                 :option-id option-id
+                 :state state)))
+            (setq agent-shell-to-go--pending-permissions
+                  (cl-remove key agent-shell-to-go--pending-permissions
+                             :key #'car
+                             :test #'equal))))))))
 
 (cl-defun agent-shell-to-go--bridge-on-slash-command
     (&key transport command args channel &allow-other-keys)

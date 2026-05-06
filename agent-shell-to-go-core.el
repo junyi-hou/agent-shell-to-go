@@ -62,11 +62,6 @@ When nil, only status icons are shown (use expand reaction to reveal)."
   :type 'integer
   :group 'agent-shell-to-go)
 
-(defcustom agent-shell-to-go-todo-directory "~/org/todo/"
-  "Directory where bookmark TODOs are saved as org files."
-  :type 'string
-  :group 'agent-shell-to-go)
-
 (defcustom agent-shell-to-go-storage-base-dir "~/.agent-shell/"
   "Base directory for per-transport state storage.
 Each transport gets a subdirectory named after it."
@@ -320,8 +315,7 @@ Later lookups via `agent-shell-to-go-get-transport' return TRANSPORT."
     collapse
     permission-allow
     permission-always
-    permission-reject
-    bookmark)
+    permission-reject)
   "Closed set of canonical reaction action symbols.
 Transports map raw reactions to these when firing the reaction hook.")
 

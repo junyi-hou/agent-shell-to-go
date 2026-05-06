@@ -89,8 +89,7 @@ Developer Portal under Bot → Privileged Gateway Intents."
     (expand-full . ("open_book" "green_book"))
     (permission-allow . ("white_check_mark" "thumbsup"))
     (permission-always . ("unlock" "star"))
-    (permission-reject . ("x" "thumbsdown"))
-    (bookmark . ("bookmark")))
+    (permission-reject . ("x" "thumbsdown")))
   "Map canonical action symbols to Discord custom emoji names.
 Values are the ASCII names of custom server emojis (emoji.name in Gateway events).
 Standard Unicode emoji reactions use the Unicode character as name, so this map

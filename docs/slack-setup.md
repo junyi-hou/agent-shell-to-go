@@ -207,12 +207,6 @@ Use these in the channel (not in threads):
 | 👀 | Show ~500 chars (remove to collapse) |
 | 📖 | Show full output (remove to collapse) |
 
-**Feedback:**
-
-| Emoji | Action |
-|-------|--------|
-| 🔖 | Create an org-mode TODO from the message |
-
 Long messages are automatically truncated to 500 characters. Add 👀 to see more, 📖 for the full text.
 
 ## Customization
@@ -230,9 +224,6 @@ Long messages are automatically truncated to 500 characters. Add 👀 to see mor
 ;; Custom function to set up new projects
 ;; Called with (PROJECT-NAME BASE-DIR CALLBACK), should call CALLBACK with project-dir when done
 (setq agent-shell-to-go-new-project-function #'my/new-python-project)
-
-;; Directory for bookmark TODOs (default: ~/org/todo/)
-(setq agent-shell-to-go-todo-directory "~/org/todo/")
 
 ;; Hide tool call outputs by default (just show ✅/❌)
 (setq agent-shell-to-go-show-tool-output nil)

@@ -42,7 +42,6 @@ Planned/possible integrations:
 
 ## Roadmap
 
-- [x] Bookmarks - bookmark reaction creates org-mode TODO scheduled for today
 - [x] Better UTF-8 and unicode handling (now uses curl)
 - [x] Per-project channels - each project gets its own Slack channel automatically
 - [x] Message queuing - messages sent while agent is busy are queued automatically

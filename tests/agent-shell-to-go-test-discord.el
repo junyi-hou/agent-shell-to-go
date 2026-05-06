@@ -46,8 +46,7 @@
   (should (eq 'permission-always (agent-shell-to-go--discord-emoji-to-action "unlock")))
   (should (eq 'permission-always (agent-shell-to-go--discord-emoji-to-action "star")))
   (should (eq 'permission-reject (agent-shell-to-go--discord-emoji-to-action "x")))
-  (should (eq 'permission-reject (agent-shell-to-go--discord-emoji-to-action "thumbsdown")))
-  (should (eq 'bookmark (agent-shell-to-go--discord-emoji-to-action "bookmark"))))
+  (should (eq 'permission-reject (agent-shell-to-go--discord-emoji-to-action "thumbsdown"))))
 
 (ert-deftest agent-shell-to-go-test-discord-emoji-to-action-unknown ()
   "Unregistered emoji names return nil."
@@ -326,7 +325,7 @@
     (agent-shell-to-go--discord-normalize-reaction
      tr `((channel_id . "C1") (message_id . "M1")
           (user_id . "USER1")
-          (emoji . ((name . "bookmark"))))
+          (emoji . ((name . "eyes"))))
      nil)
     (should (null (plist-get received :added-p)))))
 
