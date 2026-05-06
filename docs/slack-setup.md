@@ -27,7 +27,6 @@ Unauthorized users cannot send messages, use reactions, or run slash commands.
 ### Additional recommendations
 
 - **Run in a VM** — limits blast radius if an agent is tricked into running malicious commands
-- **Run risky agents in containers** — use `/new-agent-container` for untrusted code
 - **Limit workspace membership** — only invite trusted people; the allowlist protects you, but defense in depth is wise
 - **Opt out of Slack's ML training** — Workspace Owners can email `feedback@slack.com` with subject "Slack Global model opt-out request" and your workspace URL. See [Slack's privacy principles](https://slack.com/trust/data-management/privacy-principles).
 - Keep your Slack tokens secure (treat them like SSH keys)
@@ -81,7 +80,6 @@ Skip to [Configure credentials](#2-configure-credentials).
    - In the sidebar, click "Slash Commands" and create:
      - `/new-project` — "Create a new project and start an agent"
      - `/new-agent` — "Start new agent in a folder"
-     - `/new-agent-container` — "Start new agent in a container"
      - `/projects` — "List open projects from Emacs"
 
 6. **Install the App**
@@ -186,7 +184,6 @@ Use these in the channel (not in threads):
 |---------|-------------|
 | `/new-project <name>` | Create a new project folder and start an agent |
 | `/new-agent [folder]` | Start a new agent |
-| `/new-agent-container [folder]` | Start a new agent in a container |
 | `/projects` | List open projects from Emacs |
 
 ### Reactions

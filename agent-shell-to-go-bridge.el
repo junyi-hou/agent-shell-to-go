@@ -119,28 +119,28 @@ Keys: :transport :channel-id :thread-id.  Consumed (set to nil) on first use.")
 
 (defun agent-shell-to-go--extract-diff (update)
   "Extract (old-text . new-text) from tool call UPDATE, or nil."
-  (let* ((content (alist-get 'content update))
-         (raw-input (alist-get 'rawInput update))
+  (let* ((content (map-elt update 'content))
+         (raw-input (map-elt update 'rawInput))
          (content-list
           (cond
            ((vectorp content)
             (append content nil))
-           ((and content (listp content) (not (alist-get 'type content)))
+           ((and content (listp content) (not (map-elt content 'type)))
             content)
            (content
             (list content)))))
     (cond
      ((and content-list
            (seq-find
-            (lambda (item) (equal (alist-get 'type item) "diff")) content-list))
+            (lambda (item) (equal (map-elt item 'type) "diff")) content-list))
       (let ((di
              (seq-find
-              (lambda (item) (equal (alist-get 'type item) "diff")) content-list)))
-        (cons (or (alist-get 'oldText di) "") (alist-get 'newText di))))
-     ((and raw-input (alist-get 'new_str raw-input))
-      (cons (or (alist-get 'old_str raw-input) "") (alist-get 'new_str raw-input)))
-     ((and raw-input (alist-get 'diff raw-input))
-      (agent-shell-to-go--parse-unified-diff (alist-get 'diff raw-input))))))
+              (lambda (item) (equal (map-elt item 'type) "diff")) content-list)))
+        (cons (or (map-elt di 'oldText) "") (map-elt di 'newText))))
+     ((and raw-input (map-elt raw-input 'new_str))
+      (cons (or (map-elt raw-input 'old_str) "") (map-elt raw-input 'new_str)))
+     ((and raw-input (map-elt raw-input 'diff))
+      (agent-shell-to-go--parse-unified-diff (map-elt raw-input 'diff))))))
 
 ; Send helpers (buffer-context wrappers) 
 
@@ -182,9 +182,9 @@ OPTIONS is forwarded to `agent-shell-to-go-transport-send-text'."
            ('permission-reject '("deny" "reject" "reject_once")))))
     (when-let* ((opt
                  (seq-find
-                  (lambda (opt) (member (alist-get 'kind opt) kinds))
+                  (lambda (opt) (member (map-elt opt 'kind) kinds))
                   (append options nil))))
-      (or (alist-get 'optionId opt) (alist-get 'id opt)))))
+      (or (map-elt opt 'optionId) (map-elt opt 'id)))))
 
 ; Set agent mode helper 
 
@@ -356,15 +356,15 @@ Presentation reactions are handled by the main dispatcher registered first."
            (pending (assoc key agent-shell-to-go--pending-permissions #'equal)))
       (when pending
         (let* ((info (cdr pending))
-               (request-id (plist-get info :request-id))
-               (buffer (plist-get info :buffer))
-               (options (plist-get info :options))
+               (request-id (map-elt info :request-id))
+               (buffer (map-elt info :buffer))
+               (options (map-elt info :options))
                (option-id (agent-shell-to-go--find-option-id options action)))
           (when (and buffer (buffer-live-p buffer) option-id)
             (with-current-buffer buffer
               (let ((state agent-shell--state))
                 (agent-shell--send-permission-response
-                 :client (alist-get :client state)
+                 :client (map-elt state :client)
                  :request-id request-id
                  :option-id option-id
                  :state state)))
@@ -374,24 +374,18 @@ Presentation reactions are handled by the main dispatcher registered first."
                              :test #'equal))))))))
 
 (cl-defun agent-shell-to-go--bridge-on-slash-command
-    (&key transport command args channel &allow-other-keys)
+    (&key transport command args channel-id &allow-other-keys)
   "Handle an inbound slash command from a transport."
   (let* ((typed-args args)
          (reply
           (lambda (text)
-            (agent-shell-to-go-transport-send-text transport channel nil text))))
+            (agent-shell-to-go-transport-send-text transport channel-id nil text))))
     (pcase command
-      ("/new-agent" (let* ((folder
-               (expand-file-name
-                (or (plist-get typed-args :folder) agent-shell-to-go-default-folder)))
-              (container-p (plist-get typed-args :container-p)))
-         (agent-shell-to-go--start-agent-in-folder
-          folder container-p transport channel)))
-      ("/new-agent-container" (let ((folder
+      ("/new-agent" (let ((folder
               (expand-file-name
-               (or (plist-get typed-args :folder) agent-shell-to-go-default-folder))))
-         (agent-shell-to-go--start-agent-in-folder folder t transport channel)))
-      ("/new-project" (let ((project-name (plist-get typed-args :project-name)))
+               (or (map-elt typed-args :folder) agent-shell-to-go-default-folder))))
+         (agent-shell-to-go--start-agent-in-folder folder transport channel-id)))
+      ("/new-project" (let ((project-name (map-elt typed-args :project-name)))
          (if (not project-name)
              (funcall reply "Usage: `/new-project <project-name>`")
            (let ((project-dir
@@ -403,7 +397,7 @@ Presentation reactions are handled by the main dispatcher registered first."
                       (lambda (final-dir)
                         (funcall reply "Starting Claude Code…")
                         (agent-shell-to-go--start-agent-in-folder
-                         final-dir nil transport channel))))
+                         final-dir transport channel-id))))
                  (if agent-shell-to-go-new-project-function
                      (funcall agent-shell-to-go-new-project-function
                               project-name
@@ -419,25 +413,17 @@ Presentation reactions are handled by the main dispatcher registered first."
                  (funcall reply p)))
            (funcall reply "No open projects found")))))))
 
-(defun agent-shell-to-go--start-agent-in-folder (folder container-p transport channel)
-  "Start an agent in FOLDER, notify CHANNEL via TRANSPORT."
-  (agent-shell-to-go--debug "starting agent in %s (container: %s)" folder container-p)
+(defun agent-shell-to-go--start-agent-in-folder (folder transport channel-id)
+  "Start an agent in FOLDER, notify CHANNEL-ID via TRANSPORT."
+  (agent-shell-to-go--debug "starting agent in %s" folder)
   (if (file-directory-p folder)
       (let ((default-directory folder))
         (save-window-excursion
           (condition-case err
               (progn
-                (funcall agent-shell-to-go-start-agent-function
-                         (if container-p
-                             '(4)
-                           nil))
+                (funcall agent-shell-to-go-start-agent-function)
                 (agent-shell-to-go-transport-send-text
-                 transport channel nil
-                 (format "Agent started in `%s`%s"
-                         folder
-                         (if container-p
-                             " (container)"
-                           ""))))
+                 transport channel-id nil (format "Agent started in `%s`" folder)))
             (error
              (agent-shell-to-go--debug "error starting agent: %s" err)))))
     (agent-shell-to-go-transport-send-text
@@ -502,10 +488,10 @@ Presentation reactions are handled by the main dispatcher registered first."
 
 (defun agent-shell-to-go--on-request (orig-fn &rest args)
   "Advice around `agent-shell--on-request'.  Notify on permission requests."
-  (let* ((state (plist-get args :state))
-         (request (plist-get args :acp-request))
-         (method (alist-get 'method request))
-         (buffer (and state (alist-get :buffer state))))
+  (let* ((state (map-elt args :state))
+         (request (map-elt args :acp-request))
+         (method (map-elt request 'method))
+         (buffer (and state (map-elt state :buffer))))
     (when (and buffer
                (buffer-live-p buffer)
                (equal method "session/request_permission")
@@ -513,13 +499,13 @@ Presentation reactions are handled by the main dispatcher registered first."
       (let* ((thread-id (buffer-local-value 'agent-shell-to-go--thread-id buffer))
              (transport (buffer-local-value 'agent-shell-to-go--transport buffer))
              (channel-id (buffer-local-value 'agent-shell-to-go--channel-id buffer))
-             (request-id (alist-get 'id request))
-             (params (alist-get 'params request))
-             (options (alist-get 'options params))
-             (tool-call (alist-get 'toolCall params))
-             (title (alist-get 'title tool-call))
-             (raw-input (alist-get 'rawInput tool-call))
-             (command (and raw-input (alist-get 'command raw-input))))
+             (request-id (map-elt request 'id))
+             (params (map-elt request 'params))
+             (options (map-elt params 'options))
+             (tool-call (map-elt params 'toolCall))
+             (title (map-elt tool-call 'title))
+             (raw-input (map-elt tool-call 'rawInput))
+             (command (and raw-input (map-elt raw-input 'command))))
         (when (and thread-id transport channel-id)
           (condition-case err
               (let
@@ -547,7 +533,7 @@ Presentation reactions are handled by the main dispatcher registered first."
 
 (defun agent-shell-to-go--on-send-command (orig-fn &rest args)
   "Advice around `agent-shell--send-command'.  Mirror user prompts."
-  (let ((prompt (plist-get args :prompt)))
+  (let ((prompt (map-elt args :prompt)))
     (if (and prompt (member prompt agent-shell-to-go--remote-queued))
         (setq agent-shell-to-go--remote-queued
               (delete prompt agent-shell-to-go--remote-queued))
@@ -573,18 +559,18 @@ Presentation reactions are handled by the main dispatcher registered first."
 
 (defun agent-shell-to-go--on-notification (orig-fn &rest args)
   "Advice around `agent-shell--on-notification'.  Accumulate agent message chunks."
-  (let* ((state (plist-get args :state))
-         (buffer (alist-get :buffer state)))
+  (let* ((state (map-elt args :state))
+         (buffer (map-elt state :buffer)))
     (when (and buffer
                (buffer-live-p buffer)
                (buffer-local-value 'agent-shell-to-go-mode buffer))
-      (let* ((notification (plist-get args :acp-notification))
-             (params (alist-get 'params notification))
-             (update (alist-get 'update params))
+      (let* ((notification (map-elt args :acp-notification))
+             (params (map-elt notification 'params))
+             (update (map-elt params 'update))
              (thread-id (buffer-local-value 'agent-shell-to-go--thread-id buffer)))
         (when (and thread-id
-                   (equal (alist-get 'sessionUpdate update) "agent_message_chunk"))
-          (let ((text (alist-get 'text (alist-get 'content update))))
+                   (equal (map-elt update 'sessionUpdate) "agent_message_chunk"))
+          (let ((text (map-elt (map-elt update 'content) 'text)))
             (with-current-buffer buffer
               (setq agent-shell-to-go--current-agent-message
                     (concat agent-shell-to-go--current-agent-message text))))))))
@@ -605,8 +591,8 @@ Called via `agent-shell-subscribe-to' with the shell buffer current."
           (let* ((content-text
                   (and content
                        (mapconcat (lambda (item)
-                                    (or (alist-get 'text (alist-get 'content item))
-                                        (alist-get 'text item)
+                                    (or (map-elt (map-elt item 'content) 'text)
+                                        (map-elt item 'text)
                                         ""))
                                   (if (vectorp content)
                                       (append content nil)
@@ -662,10 +648,10 @@ Called via `agent-shell-subscribe-to' with the shell buffer current."
               (agent-shell-to-go--send icon))))
         ;; Tool call started — flush any buffered agent text first, then notify
         (let* ((title (map-elt tool-call :title))
-               (command (alist-get 'command raw-input))
-               (file-path (alist-get 'file_path raw-input))
-               (query (alist-get 'query raw-input))
-               (url (alist-get 'url raw-input))
+               (command (map-elt raw-input 'command))
+               (file-path (map-elt raw-input 'file_path))
+               (query (map-elt raw-input 'query))
+               (url (map-elt raw-input 'url))
                (specific (or command file-path query url))
                (already-sent
                 (and tool-call-id
@@ -738,7 +724,7 @@ Called via `agent-shell-subscribe-to' with the shell buffer current."
   (let* ((inherited agent-shell-to-go--inherit-state)
          (_ (setq agent-shell-to-go--inherit-state nil))
          (transport
-          (or (plist-get inherited :transport) (agent-shell-to-go--default-transport)))
+          (or (map-elt inherited :transport) (agent-shell-to-go--default-transport)))
          (project-path (agent-shell-to-go--get-project-path)))
     ;; Load credentials / connect if needed
     (unless (agent-shell-to-go-transport-connected-p transport)
@@ -746,12 +732,12 @@ Called via `agent-shell-subscribe-to' with the shell buffer current."
     ;; Resolve channel (reuse inherited or create fresh)
     (setq agent-shell-to-go--transport transport)
     (setq agent-shell-to-go--channel-id
-          (or (plist-get inherited :channel-id)
+          (or (map-elt inherited :channel-id)
               (agent-shell-to-go-transport-ensure-project-channel
                transport project-path)))
     ;; Start thread (reuse inherited or create fresh)
     (setq agent-shell-to-go--thread-id
-          (or (plist-get inherited :thread-id)
+          (or (map-elt inherited :thread-id)
               (agent-shell-to-go-transport-start-thread
                transport agent-shell-to-go--channel-id (buffer-name))))
     ;; Track buffer

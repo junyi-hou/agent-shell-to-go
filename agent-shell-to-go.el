@@ -227,10 +227,10 @@ Reports to the *Agent Shell Threads* buffer."
                 (dolist (thread
                          (sort threads
                                (lambda (a b)
-                                 (> (or (plist-get a :last-timestamp) 0)
-                                    (or (plist-get b :last-timestamp) 0)))))
-                  (let* ((ts (plist-get thread :thread-id))
-                         (last (or (plist-get thread :last-timestamp) 0))
+                                 (> (or (map-elt a :last-timestamp) 0)
+                                    (or (map-elt b :last-timestamp) 0)))))
+                  (let* ((ts (map-elt thread :thread-id))
+                         (last (or (map-elt thread :last-timestamp) 0))
                          (age-h (/ (- now last) 3600.0)))
                     (insert (format "  %s  %.1fh ago\n" ts age-h))))
                 (insert (format "\n%d threads total\n\n" (length threads))))))))
@@ -260,8 +260,8 @@ Signal prefix arg or DRY-RUN to only report."
                      (agent-shell-to-go-transport-list-threads transport channel))))
              (to-delete nil))
         (dolist (thread threads)
-          (let* ((ts (plist-get thread :thread-id))
-                 (last (or (plist-get thread :last-timestamp) 0))
+          (let* ((ts (map-elt thread :thread-id))
+                 (last (or (map-elt thread :last-timestamp) 0))
                  (age (- now last))
                  (active-p
                   (agent-shell-to-go--bridge-thread-active-p transport channel ts)))

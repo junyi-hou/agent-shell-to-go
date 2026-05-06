@@ -35,20 +35,20 @@
 (ert-deftest agent-shell-to-go-test-core-slash-arg-parsing ()
   "Slash command args parse correctly for each command."
   (let ((args (agent-shell-to-go--parse-slash-args "/new-agent" "~/code/myproject")))
-    (should (equal "~/code/myproject" (plist-get args :folder)))
-    (should (null (plist-get args :container-p))))
+    (should (equal "~/code/myproject" (map-elt args :folder)))
+    (should (null (map-elt args :container-p))))
   (let ((args (agent-shell-to-go--parse-slash-args "/new-agent-container" "~/code/foo")))
-    (should (equal "~/code/foo" (plist-get args :folder)))
-    (should (plist-get args :container-p)))
+    (should (equal "~/code/foo" (map-elt args :folder)))
+    (should (map-elt args :container-p)))
   (let ((args (agent-shell-to-go--parse-slash-args "/new-project" "myapp")))
-    (should (equal "myapp" (plist-get args :project-name)))))
+    (should (equal "myapp" (map-elt args :project-name)))))
 
 (ert-deftest agent-shell-to-go-test-core-slash-arg-parsing-edge-cases ()
   "Slash arg parsing handles empty args and unknown commands."
   (let ((args (agent-shell-to-go--parse-slash-args "/new-agent" "")))
-    (should (null (plist-get args :folder))))
+    (should (null (map-elt args :folder))))
   (let ((args (agent-shell-to-go--parse-slash-args "/new-agent" "  ")))
-    (should (null (plist-get args :folder))))
+    (should (null (map-elt args :folder))))
   (should (null (agent-shell-to-go--parse-slash-args "/unknown-command" "foo")))
   (should (null (agent-shell-to-go--parse-slash-args "/projects" "ignored"))))
 

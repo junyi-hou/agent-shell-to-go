@@ -222,9 +222,9 @@
           (author . ((id . "USER1") (bot . :json-false)))
           (content . "hello")))
     (should received)
-    (should (equal "USER1" (plist-get received :user)))
-    (should (equal "hello" (plist-get received :text)))
-    (should (equal "M1" (plist-get received :msg-id)))))
+    (should (equal "USER1" (map-elt received :user)))
+    (should (equal "hello" (map-elt received :text)))
+    (should (equal "M1" (map-elt received :msg-id)))))
 
 (ert-deftest agent-shell-to-go-test-discord-normalize-message-ignores-bot ()
   "normalize-message ignores messages from bots."
@@ -292,8 +292,8 @@
      tr `((id . "M2") (channel_id . "THREAD1")
           (author . ((id . "USER1") (bot . :json-false)))
           (content . "in thread")))
-    (should (equal "FORUM1" (plist-get received :channel)))
-    (should (equal "THREAD1" (plist-get received :thread-id)))))
+    (should (equal "FORUM1" (map-elt received :channel)))
+    (should (equal "THREAD1" (map-elt received :thread-id)))))
 
 ;; ---------------------------------------------------------------------------
 ;; normalize-reaction hook firing
@@ -311,9 +311,9 @@
           (emoji . ((name . "eyes"))))
      t)
     (should received)
-    (should (eq 'expand-truncated (plist-get received :action)))
-    (should (equal "eyes" (plist-get received :raw-emoji)))
-    (should (eq t (plist-get received :added-p)))))
+    (should (eq 'expand-truncated (map-elt received :action)))
+    (should (equal "eyes" (map-elt received :raw-emoji)))
+    (should (eq t (map-elt received :added-p)))))
 
 (ert-deftest agent-shell-to-go-test-discord-normalize-reaction-removed ()
   "normalize-reaction passes added-p nil for reaction remove events."
@@ -327,7 +327,7 @@
           (user_id . "USER1")
           (emoji . ((name . "eyes"))))
      nil)
-    (should (null (plist-get received :added-p)))))
+    (should (null (map-elt received :added-p)))))
 
 (ert-deftest agent-shell-to-go-test-discord-normalize-reaction-ignores-bot ()
   "normalize-reaction ignores reactions from the bot's own user ID."
@@ -356,8 +356,8 @@
           (emoji . ((name . "dancing_penguin"))))
      t)
     (should received)
-    (should (null (plist-get received :action)))
-    (should (equal "dancing_penguin" (plist-get received :raw-emoji)))))
+    (should (null (map-elt received :action)))
+    (should (equal "dancing_penguin" (map-elt received :raw-emoji)))))
 
 ;; ---------------------------------------------------------------------------
 ;; normalize-interaction hook firing
@@ -379,8 +379,8 @@
             (data . ((name . "new-agent")
                      (options . [((name . "folder") (value . "~/code"))]))))))
     (should received)
-    (should (equal "/new-agent" (plist-get received :command)))
-    (should (equal "~/code" (plist-get received :args-text)))))
+    (should (equal "/new-agent" (map-elt received :command)))
+    (should (equal "~/code" (map-elt received :args-text)))))
 
 (ert-deftest agent-shell-to-go-test-discord-normalize-interaction-ignores-unauthorized ()
   "normalize-interaction does not fire hook for unauthorized users."

@@ -270,12 +270,10 @@ Returns the parsed JSON response or nil."
            (channels
             (when (vectorp resp)
               (append resp nil))))
-      (alist-get
-       'id
-       (seq-find
+      (map-elt (seq-find
         (lambda (ch)
-          (and (equal (alist-get 'name ch) name) (= (or (alist-get 'type ch) -1) 15)))
-        channels)))))
+          (and (equal (map-elt ch 'name) name) (= (or (map-elt ch 'type) -1) 15)))
+        channels) 'id))))
 
 (defun agent-shell-to-go--discord-create-channel (name)
   "Create a Discord forum channel (type 15) named NAME in the guild. Return its ID or nil."
@@ -285,7 +283,7 @@ Returns the parsed JSON response or nil."
                                             (format "/guilds/%s/channels"
                                                     agent-shell-to-go-discord-guild-id)
                                             `((name . ,name) (type . 15))))
-           (id (alist-get 'id resp)))
+           (id (map-elt resp 'id)))
       (or id (agent-shell-to-go--discord-find-channel-by-name name)))))
 
 (defun agent-shell-to-go--discord-get-or-create-project-channel (transport project-path)
@@ -394,7 +392,7 @@ Returns the parsed JSON response or nil."
   "Return the bot's Discord user ID, caching the result."
   (or (agent-shell-to-go-discord-transport-bot-user-id-cache transport)
       (let* ((resp (agent-shell-to-go--discord-api "GET" "/users/@me"))
-             (uid (alist-get 'id resp)))
+             (uid (map-elt resp 'id)))
         (setf (agent-shell-to-go-discord-transport-bot-user-id-cache transport) uid)
         uid)))
 
@@ -407,7 +405,7 @@ Returns the parsed JSON response or nil."
      options)
   "Post TEXT to Discord THREAD-ID (or CHANNEL if no thread).
 Options plist supports :truncate."
-  (let* ((truncate (plist-get options :truncate))
+  (let* ((truncate (map-elt options :truncate))
          ;; Thread channel IS the destination in Discord
          (target (or thread-id channel))
          (display
@@ -421,7 +419,7 @@ Options plist supports :truncate."
                 (agent-shell-to-go--discord-api
                  "POST" (format "/channels/%s/messages" target)
                  `((content . ,safe))))
-               (msg-id (alist-get 'id resp)))
+               (msg-id (map-elt resp 'id)))
           (when (and was-truncated msg-id)
             (agent-shell-to-go--save-truncated-message transport channel msg-id text))
           msg-id)
@@ -437,7 +435,7 @@ Options plist supports :truncate."
           (agent-shell-to-go--discord-api
            "PATCH" (format "/channels/%s/messages/%s" channel message-id)
            `((content . ,safe)))))
-    (alist-get 'id resp)))
+    (map-elt resp 'id)))
 
 (cl-defmethod agent-shell-to-go-transport-upload-file
     ((transport agent-shell-to-go-discord-transport)
@@ -464,7 +462,7 @@ INTERACTION-TOKEN must be \"{interaction-id}:{token}\"."
            ;; Type 5 = DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE (think then reply)
            ;; Type 4 = CHANNEL_MESSAGE_WITH_SOURCE (reply immediately with content)
            (response-type
-            (if (plist-get options :deferred)
+            (if (map-elt options :deferred)
                 5
               4)))
       (agent-shell-to-go--discord-api "POST"
@@ -479,7 +477,7 @@ INTERACTION-TOKEN must be \"{interaction-id}:{token}\"."
   (let* ((resp
           (agent-shell-to-go--discord-api
            "GET" (format "/channels/%s/messages/%s" channel message-id))))
-    (alist-get 'content resp)))
+    (map-elt resp 'content)))
 
 (cl-defmethod agent-shell-to-go-transport-get-reactions
     ((transport agent-shell-to-go-discord-transport) channel message-id)
@@ -502,9 +500,9 @@ In Discord the thread IS a channel, so THREAD-ID is the channel to query."
     (mapcar
      (lambda (msg)
        (list
-        :msg-id (alist-get 'id msg)
-        :user (alist-get 'id (alist-get 'author msg))
-        :text (alist-get 'content msg)))
+        :msg-id (map-elt msg 'id)
+        :user (map-elt (map-elt msg 'author) 'id)
+        :text (map-elt msg 'content)))
      (nreverse messages))))
 
 (cl-defmethod agent-shell-to-go-transport-start-thread
@@ -529,7 +527,7 @@ CHANNEL must be a forum channel (type 15); LABEL becomes the post title."
              (message
               .
               ((content . ,(agent-shell-to-go--discord-truncate-content opening)))))))
-         (thread-id (alist-get 'id resp)))
+         (thread-id (map-elt resp 'id)))
     ;; Record parent forum so inbound messages from this post can be routed back.
     (when thread-id
       (puthash
@@ -566,10 +564,10 @@ CHANNEL must be a forum channel (type 15); LABEL becomes the post title."
                (format "/guilds/%s/threads/active" agent-shell-to-go-discord-guild-id)))
              (threads
               (when resp
-                (append (alist-get 'threads resp) nil))))
+                (append (map-elt resp 'threads) nil))))
         (dolist (thread threads)
-          (when (equal (alist-get 'parent_id thread) channel)
-            (let* ((tid (alist-get 'id thread))
+          (when (equal (map-elt thread 'parent_id) channel)
+            (let* ((tid (map-elt thread 'id))
                    ;; Derive approximate timestamp from Discord snowflake
                    (ts (/ (+ (ash (string-to-number tid) -22) 1420070400000) 1000.0)))
               (push (list :thread-id tid :last-timestamp ts) result))))))
@@ -579,9 +577,9 @@ CHANNEL must be a forum channel (type 15); LABEL becomes the post title."
              "GET" (format "/channels/%s/threads/archived/public?limit=100" channel)))
            (threads
             (when resp
-              (append (alist-get 'threads resp) nil))))
+              (append (map-elt resp 'threads) nil))))
       (dolist (thread threads)
-        (let* ((tid (alist-get 'id thread))
+        (let* ((tid (map-elt thread 'id))
                (ts (/ (+ (ash (string-to-number tid) -22) 1420070400000) 1000.0)))
           (push (list :thread-id tid :last-timestamp ts) result))))
     result))
@@ -702,15 +700,15 @@ CHANNEL must be a forum channel (type 15); LABEL becomes the post title."
             (error
              nil))))
     (when data
-      (let* ((op (alist-get 'op data))
-             (d (alist-get 'd data))
-             (s (alist-get 's data))
-             (t-event (alist-get 't data)))
+      (let* ((op (map-elt data 'op))
+             (d (map-elt data 'd))
+             (s (map-elt data 's))
+             (t-event (map-elt data 't)))
         (when s
           (setf (agent-shell-to-go-discord-transport-sequence transport) s))
         (cond
          ((= op agent-shell-to-go--discord-op-hello)
-          (let ((interval (alist-get 'heartbeat_interval d)))
+          (let ((interval (map-elt d 'heartbeat_interval)))
             (agent-shell-to-go--debug
              "discord gateway: hello, heartbeat_interval=%dms" interval)
             (agent-shell-to-go--discord-start-heartbeat transport interval)
@@ -749,9 +747,9 @@ CHANNEL must be a forum channel (type 15); LABEL becomes the post title."
   "Dispatch Discord Gateway event EVENT-TYPE with DATA through inbound hooks."
   (agent-shell-to-go--debug "discord dispatch: %s" event-type)
   (pcase event-type
-    ("READY" (let* ((user (alist-get 'user data))
-            (uid (alist-get 'id user))
-            (sid (alist-get 'session_id data)))
+    ("READY" (let* ((user (map-elt data 'user))
+            (uid (map-elt user 'id))
+            (sid (map-elt data 'session_id)))
        (setf (agent-shell-to-go-discord-transport-bot-user-id-cache transport) uid)
        (setf (agent-shell-to-go-discord-transport-session-id transport) sid)
        (agent-shell-to-go--debug "discord gateway: ready as user=%s" uid)))
@@ -776,12 +774,12 @@ Otherwise treats CHANNEL-ID as a top-level channel with no thread."
 
 (defun agent-shell-to-go--discord-normalize-message (transport data)
   "Normalize a Discord MESSAGE_CREATE payload and fire the message hook."
-  (let* ((msg-id (alist-get 'id data))
-         (channel-id (alist-get 'channel_id data))
-         (author (alist-get 'author data))
-         (user-id (alist-get 'id author))
-         (bot-p (eq (alist-get 'bot author) t))
-         (content (alist-get 'content data))
+  (let* ((msg-id (map-elt data 'id))
+         (channel-id (map-elt data 'channel_id))
+         (author (map-elt data 'author))
+         (user-id (map-elt author 'id))
+         (bot-p (eq (map-elt author 'bot) t))
+         (content (map-elt data 'content))
          (bot-uid (agent-shell-to-go-discord-transport-bot-user-id-cache transport)))
     (unless (or bot-p
                 (not content)
@@ -806,11 +804,11 @@ Otherwise treats CHANNEL-ID as a top-level channel with no thread."
 (defun agent-shell-to-go--discord-normalize-reaction (transport data added-p)
   "Normalize a Discord reaction event and fire the reaction hook.
 ADDED-P is t for MESSAGE_REACTION_ADD, nil for MESSAGE_REACTION_REMOVE."
-  (let* ((channel-id (alist-get 'channel_id data))
-         (msg-id (alist-get 'message_id data))
-         (user-id (alist-get 'user_id data))
-         (emoji (alist-get 'emoji data))
-         (emoji-name (alist-get 'name emoji))
+  (let* ((channel-id (map-elt data 'channel_id))
+         (msg-id (map-elt data 'message_id))
+         (user-id (map-elt data 'user_id))
+         (emoji (map-elt data 'emoji))
+         (emoji-name (map-elt emoji 'name))
          (action (agent-shell-to-go--discord-emoji-to-action emoji-name))
          (bot-uid (agent-shell-to-go-discord-transport-bot-user-id-cache transport)))
     (unless (equal user-id bot-uid)
@@ -837,20 +835,20 @@ ADDED-P is t for MESSAGE_REACTION_ADD, nil for MESSAGE_REACTION_REMOVE."
 
 (defun agent-shell-to-go--discord-normalize-interaction (transport data)
   "Normalize a Discord INTERACTION_CREATE payload and fire the slash command hook."
-  (let* ((interaction-id (alist-get 'id data))
-         (interaction-token (alist-get 'token data))
-         (interaction-type (alist-get 'type data))
-         (channel-id (alist-get 'channel_id data))
-         (member (alist-get 'member data))
-         (user (or (alist-get 'user data) (alist-get 'user member)))
-         (user-id (alist-get 'id user))
-         (cmd-data (alist-get 'data data))
+  (let* ((interaction-id (map-elt data 'id))
+         (interaction-token (map-elt data 'token))
+         (interaction-type (map-elt data 'type))
+         (channel-id (map-elt data 'channel_id))
+         (member (map-elt data 'member))
+         (user (or (map-elt data 'user) (map-elt member 'user)))
+         (user-id (map-elt user 'id))
+         (cmd-data (map-elt data 'data))
          (command-name
           (when cmd-data
-            (concat "/" (alist-get 'name cmd-data))))
+            (concat "/" (map-elt cmd-data 'name))))
          (options
           (when cmd-data
-            (append (alist-get 'options cmd-data) nil)))
+            (append (map-elt cmd-data 'options) nil)))
          (combined-token (format "%s:%s" interaction-id interaction-token)))
     ;; type 2 = APPLICATION_COMMAND
     (when (= (or interaction-type 0) 2)
@@ -861,7 +859,7 @@ ADDED-P is t for MESSAGE_REACTION_ADD, nil for MESSAGE_REACTION_REMOVE."
       (when (agent-shell-to-go-transport-authorized-p transport user-id)
         (let* ((args-text
                 (mapconcat (lambda (opt)
-                             (let ((v (alist-get 'value opt)))
+                             (let ((v (map-elt opt 'value)))
                                (if v
                                    (format "%s" v)
                                  "")))
@@ -905,14 +903,6 @@ Must be called once after initial bot setup or command changes."
          (commands
           `[((name . "new-agent")
              (description . "Start a new agent-shell session") (type . 1)
-             (options
-              .
-              [((name . "folder")
-                (description . "Working directory (optional)")
-                (type . 3)
-                (required . :json-false))]))
-            ((name . "new-agent-container")
-             (description . "Start a new containerized agent-shell session") (type . 1)
              (options
               .
               [((name . "folder")

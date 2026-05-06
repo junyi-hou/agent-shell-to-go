@@ -300,8 +300,8 @@
             (should (string-match-p "rm -rf /tmp/test" (car texts))))
           (should (= 1 (length agent-shell-to-go--pending-permissions)))
           (let ((info (cdar agent-shell-to-go--pending-permissions)))
-            (should (equal "req1" (plist-get info :request-id)))
-            (should (eq buf (plist-get info :buffer)))))
+            (should (equal "req1" (map-elt info :request-id)))
+            (should (eq buf (map-elt info :buffer)))))
       (setq agent-shell-to-go--pending-permissions nil)
       (agent-shell-to-go-test--cleanup-buffer buf))))
 
@@ -384,7 +384,7 @@
     (unwind-protect
         (cl-letf (((symbol-function 'agent-shell--send-permission-response)
                    (lambda (&rest args)
-                     (setq responded-with (plist-get args :option-id)))))
+                     (setq responded-with (map-elt args :option-id)))))
           (agent-shell-to-go-test-fire-reaction
            tr "test-channel" msg-id "u1" 'permission-allow t)
           (should (equal "opt-allow" responded-with)))
@@ -407,7 +407,7 @@
     (unwind-protect
         (cl-letf (((symbol-function 'agent-shell--send-permission-response)
                    (lambda (&rest args)
-                     (setq responded-with (plist-get args :option-id)))))
+                     (setq responded-with (map-elt args :option-id)))))
           (agent-shell-to-go-test-fire-reaction
            tr "test-channel" msg-id "u1" 'permission-reject t)
           (should (equal "opt-deny" responded-with)))

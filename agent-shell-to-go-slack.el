@@ -210,10 +210,10 @@ METHOD is GET or POST, ENDPOINT is without the base URL, DATA is the payload."
   (let* ((resp
           (agent-shell-to-go--slack-api "POST" "conversations.create"
                                         `((name . ,name) (is_private . :json-false))))
-         (ok (alist-get 'ok resp))
-         (channel (alist-get 'channel resp))
-         (channel-id (alist-get 'id channel))
-         (err (alist-get 'error resp)))
+         (ok (map-elt resp 'ok))
+         (channel (map-elt resp 'channel))
+         (channel-id (map-elt channel 'id))
+         (err (map-elt resp 'error)))
     (cond
      (ok
       (when agent-shell-to-go-slack-user-id
@@ -231,10 +231,9 @@ METHOD is GET or POST, ENDPOINT is without the base URL, DATA is the payload."
   (let* ((resp
           (agent-shell-to-go--slack-api
            "GET" "conversations.list?types=public_channel,private_channel&limit=1000"))
-         (channels (alist-get 'channels resp)))
+         (channels (map-elt resp 'channels)))
     (when channels
-      (alist-get
-       'id (seq-find (lambda (ch) (equal (alist-get 'name ch) name)) channels)))))
+      (map-elt (seq-find (lambda (ch) (equal (map-elt ch 'name) name)) channels) 'id))))
 
 (defun agent-shell-to-go--slack-get-or-create-project-channel (transport project-path)
   "Return the Slack channel id for PROJECT-PATH, creating it if necessary."
@@ -482,7 +481,7 @@ METHOD is GET or POST, ENDPOINT is without the base URL, DATA is the payload."
     ((transport agent-shell-to-go-slack-transport))
   "Return the bot's Slack user id, caching the result."
   (or (agent-shell-to-go-slack-transport-bot-user-id-cache transport)
-      (let ((uid (alist-get 'user_id (agent-shell-to-go--slack-api "GET" "auth.test"))))
+      (let ((uid (map-elt (agent-shell-to-go--slack-api "GET" "auth.test") 'user_id)))
         (setf (agent-shell-to-go-slack-transport-bot-user-id-cache transport) uid)
         uid)))
 
@@ -495,9 +494,9 @@ METHOD is GET or POST, ENDPOINT is without the base URL, DATA is the payload."
      options)
   "Post TEXT to Slack CHANNEL, optionally in THREAD-ID.
 Options plist supports :truncate :ephemeral :user-id :interaction-token."
-  (let* ((truncate (plist-get options :truncate))
-         (ephemeral (plist-get options :ephemeral))
-         (user-id (plist-get options :user-id))
+  (let* ((truncate (map-elt options :truncate))
+         (ephemeral (map-elt options :ephemeral))
+         (user-id (map-elt options :user-id))
          (clean text)
          (display
           (if truncate
@@ -517,7 +516,7 @@ Options plist supports :truncate :ephemeral :user-id :interaction-token."
                 (when (and ephemeral user-id)
                   (push `(user . ,user-id) data)))
                (resp (agent-shell-to-go--slack-api "POST" endpoint data))
-               (msg-ts (alist-get 'ts resp)))
+               (msg-ts (map-elt resp 'ts)))
           (when (and was-truncated msg-ts)
             (agent-shell-to-go--save-truncated-message transport channel msg-ts clean))
           msg-ts)
@@ -537,7 +536,7 @@ Options plist supports :truncate :ephemeral :user-id :interaction-token."
                    (agent-shell-to-go--slack-api "POST" "chat.postMessage" data)
                  (error
                   nil))))
-         (alist-get 'ts resp))))))
+         (map-elt resp 'ts))))))
 
 (cl-defmethod agent-shell-to-go-transport-edit-message
     ((transport agent-shell-to-go-slack-transport) channel message-id text)
@@ -547,7 +546,7 @@ Options plist supports :truncate :ephemeral :user-id :interaction-token."
                                        `((channel . ,channel)
                                          (ts . ,message-id)
                                          (text . ,text)))))
-    (eq (alist-get 'ok resp) t)))
+    (eq (map-elt resp 'ok) t)))
 
 (cl-defmethod agent-shell-to-go-transport-upload-file
     ((transport agent-shell-to-go-slack-transport)
@@ -565,8 +564,8 @@ Options plist supports :truncate :ephemeral :user-id :interaction-token."
              "GET"
              (format "files.getUploadURLExternal?filename=%s&length=%d"
                      (url-hexify-string filename) file-size)))
-           (upload-url (alist-get 'upload_url url-resp))
-           (file-id (alist-get 'file_id url-resp)))
+           (upload-url (map-elt url-resp 'upload_url))
+           (file-id (map-elt url-resp 'file_id)))
       (when (and upload-url file-id)
         (with-temp-buffer
           (call-process "curl"
@@ -602,9 +601,9 @@ Options plist supports :truncate :ephemeral :user-id :interaction-token."
            "GET"
            (format "conversations.history?channel=%s&latest=%s&limit=1&inclusive=true"
                    channel message-id)))
-         (messages (alist-get 'messages resp))
+         (messages (map-elt resp 'messages))
          (msg (and messages (aref messages 0))))
-    (alist-get 'text msg)))
+    (map-elt msg 'text)))
 
 (cl-defmethod agent-shell-to-go-transport-get-reactions
     ((transport agent-shell-to-go-slack-transport) channel message-id)
@@ -612,14 +611,14 @@ Options plist supports :truncate :ephemeral :user-id :interaction-token."
   (let* ((resp
           (agent-shell-to-go--slack-api
            "GET" (format "reactions.get?channel=%s&timestamp=%s" channel message-id)))
-         (message (alist-get 'message resp))
-         (reactions (alist-get 'reactions message)))
+         (message (map-elt resp 'message))
+         (reactions (map-elt message 'reactions)))
     (when reactions
       (delq
        nil
        (mapcar
         (lambda (r)
-          (agent-shell-to-go--slack-emoji-to-action (alist-get 'name r)))
+          (agent-shell-to-go--slack-emoji-to-action (map-elt r 'name)))
         (append reactions nil))))))
 
 (cl-defmethod agent-shell-to-go-transport-fetch-thread-replies
@@ -628,14 +627,14 @@ Options plist supports :truncate :ephemeral :user-id :interaction-token."
   (let* ((resp
           (agent-shell-to-go--slack-api
            "GET" (format "conversations.replies?channel=%s&ts=%s" channel thread-id)))
-         (messages (alist-get 'messages resp)))
+         (messages (map-elt resp 'messages)))
     (when messages
       (mapcar
        (lambda (msg)
          (list
-          :msg-id (alist-get 'ts msg)
-          :user (alist-get 'user msg)
-          :text (alist-get 'text msg)))
+          :msg-id (map-elt msg 'ts)
+          :user (map-elt msg 'user)
+          :text (map-elt msg 'text)))
        (append messages nil)))))
 
 (cl-defmethod agent-shell-to-go-transport-start-thread
@@ -676,13 +675,13 @@ Options plist supports :truncate :ephemeral :user-id :interaction-token."
   (let* ((resp
           (agent-shell-to-go--slack-api
            "GET" (format "conversations.history?channel=%s&limit=500" channel)))
-         (messages (alist-get 'messages resp))
+         (messages (map-elt resp 'messages))
          threads)
     (when messages
       (dolist (msg (append messages nil))
-        (let ((text (alist-get 'text msg))
-              (ts (alist-get 'ts msg))
-              (latest-reply (alist-get 'latest_reply msg)))
+        (let ((text (map-elt msg 'text))
+              (ts (map-elt msg 'ts))
+              (latest-reply (map-elt msg 'latest_reply)))
           (when (and text (string-match-p "Agent Shell Session" text))
             (push (list
                    :thread-id ts
@@ -710,14 +709,14 @@ Options plist supports :truncate :ephemeral :user-id :interaction-token."
                           (format "&cursor=%s" cursor)
                         "")))
              (resp (agent-shell-to-go--slack-api "GET" endpoint))
-             (messages (alist-get 'messages resp))
-             (meta (alist-get 'response_metadata resp)))
+             (messages (map-elt resp 'messages))
+             (meta (map-elt resp 'response_metadata)))
         (when messages
           (dolist (msg (reverse (append messages nil)))
             (agent-shell-to-go-transport-delete-message
-             transport channel (alist-get 'ts msg))
+             transport channel (map-elt msg 'ts))
             (cl-incf deleted)))
-        (setq cursor (alist-get 'next_cursor meta))
+        (setq cursor (map-elt meta 'next_cursor))
         (setq continue (and cursor (not (string-empty-p cursor))))))
     deleted))
 
@@ -772,16 +771,16 @@ Options plist supports :truncate :ephemeral :user-id :interaction-token."
       (re-search-forward "\n\n")
       (let ((resp (json-read)))
         (kill-buffer)
-        (if (eq (alist-get 'ok resp) t)
-            (alist-get 'url resp)
-          (error "Slack WebSocket URL failed: %s" (alist-get 'error resp)))))))
+        (if (eq (map-elt resp 'ok) t)
+            (map-elt resp 'url)
+          (error "Slack WebSocket URL failed: %s" (map-elt resp 'error)))))))
 
 (defun agent-shell-to-go--slack-handle-frame (transport frame)
   "Parse Socket Mode FRAME and dispatch to inbound hooks."
   (let* ((payload (websocket-frame-text frame))
          (data (json-read-from-string payload))
-         (type (alist-get 'type data))
-         (envelope-id (alist-get 'envelope_id data))
+         (type (map-elt data 'type))
+         (envelope-id (map-elt data 'envelope_id))
          (ws (agent-shell-to-go-slack-transport-ws transport)))
     ;; ACK every envelope
     (when (and envelope-id ws (agent-shell-to-go--ws-websocket ws))
@@ -790,9 +789,9 @@ Options plist supports :truncate :ephemeral :user-id :interaction-token."
        (json-encode `((envelope_id . ,envelope-id)))))
     (agent-shell-to-go--debug "slack ws type: %s" type)
     (pcase type
-      ("events_api" (let ((ep (alist-get 'payload data)))
+      ("events_api" (let ((ep (map-elt data 'payload)))
          (run-at-time 0 nil #'agent-shell-to-go--slack-dispatch-event transport ep)))
-      ("slash_commands" (let ((sp (alist-get 'payload data)))
+      ("slash_commands" (let ((sp (map-elt data 'payload)))
          (run-at-time 0 nil #'agent-shell-to-go--slack-dispatch-slash transport sp)))
       ("hello" (agent-shell-to-go--debug "slack ws: connected"))
       ("disconnect"
@@ -842,10 +841,10 @@ Options plist supports :truncate :ephemeral :user-id :interaction-token."
 
 (defun agent-shell-to-go--slack-dispatch-event (transport payload)
   "Dispatch Slack events_api PAYLOAD through the appropriate inbound hook."
-  (let* ((event (alist-get 'event payload))
-         (event-type (alist-get 'type event))
-         (user (alist-get 'user event))
-         (bot-id (alist-get 'bot_id event)))
+  (let* ((event (map-elt payload 'event))
+         (event-type (map-elt event 'type))
+         (user (map-elt event 'user))
+         (bot-id (map-elt event 'bot_id)))
     ;; Skip bot messages silently (they'll be ignored anyway since this is inbound
     ;; message from slack)
     ;; NOTE: This skips ALL bot messages. If we want agents to message each other in the
@@ -863,13 +862,13 @@ Options plist supports :truncate :ephemeral :user-id :interaction-token."
 
 (defun agent-shell-to-go--slack-normalize-message (transport event)
   "Normalize Slack message EVENT and run `agent-shell-to-go-message-hook'."
-  (let* ((ts (alist-get 'ts event))
-         (thread-ts (alist-get 'thread_ts event))
-         (channel (alist-get 'channel event))
-         (user (alist-get 'user event))
-         (text (alist-get 'text event))
-         (subtype (alist-get 'subtype event))
-         (bot-id (alist-get 'bot_id event)))
+  (let* ((ts (map-elt event 'ts))
+         (thread-ts (map-elt event 'thread_ts))
+         (channel (map-elt event 'channel))
+         (user (map-elt event 'user))
+         (text (map-elt event 'text))
+         (subtype (map-elt event 'subtype))
+         (bot-id (map-elt event 'bot_id)))
     (agent-shell-to-go--slack-log-event "msg-in" ts text)
     (when (and text
                ts
@@ -890,11 +889,11 @@ Options plist supports :truncate :ephemeral :user-id :interaction-token."
 (defun agent-shell-to-go--slack-normalize-reaction (transport event added-p)
   "Normalize Slack reaction EVENT and run `agent-shell-to-go-reaction-hook'.
 ADDED-P is t for reaction_added, nil for reaction_removed."
-  (let* ((item (alist-get 'item event))
-         (msg-id (alist-get 'ts item))
-         (channel (alist-get 'channel item))
-         (user (alist-get 'user event))
-         (emoji (alist-get 'reaction event))
+  (let* ((item (map-elt event 'item))
+         (msg-id (map-elt item 'ts))
+         (channel (map-elt item 'channel))
+         (user (map-elt event 'user))
+         (emoji (map-elt event 'reaction))
          (action (agent-shell-to-go--slack-emoji-to-action emoji)))
     (agent-shell-to-go--debug
      "slack reaction: %s on %s (%s)" emoji msg-id
@@ -917,10 +916,10 @@ ADDED-P is t for reaction_added, nil for reaction_removed."
 
 (defun agent-shell-to-go--slack-dispatch-slash (transport payload)
   "Normalize Slack slash PAYLOAD and run `agent-shell-to-go-slash-command-hook'."
-  (let* ((command (alist-get 'command payload))
-         (text (alist-get 'text payload))
-         (channel (alist-get 'channel_id payload))
-         (user (alist-get 'user_id payload))
+  (let* ((command (map-elt payload 'command))
+         (text (map-elt payload 'text))
+         (channel (map-elt payload 'channel_id))
+         (user (map-elt payload 'user_id))
          (args (agent-shell-to-go--parse-slash-args command text)))
     (agent-shell-to-go--debug "slack slash: %s %s user=%s" command text user)
     (if (not (agent-shell-to-go-transport-authorized-p transport user))
