@@ -4,7 +4,7 @@ Emacs package that mirrors agent-shell conversations to remote messaging transpo
 
 ## Dependencies
 
-This project depends on `agent-shell`. Look for the `agent-shell` library using `emacsclient -e '(locate-library "agent-shell")`.
+This project depends on `agent-shell`. Look for the `agent-shell` library using `emacsclient -e '(file-name-parent-directory  (locate-library "agent-shell"))`.
 
 Refrain from using internal functions (with prefix `agent-shell--`) as much as possible.
 

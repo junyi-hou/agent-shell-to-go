@@ -445,5 +445,46 @@
           (should (null called)))
       (agent-shell-to-go-test--cleanup-buffer buf))))
 
+; --find-option-id
+
+(ert-deftest agent-shell-to-go-test-bridge-find-option-id-allow ()
+  "Returns optionId for allow kind variants."
+  (let ((options '(((kind . "deny") (optionId . "d1"))
+                   ((kind . "allow") (optionId . "a1")))))
+    (should (equal "a1" (agent-shell-to-go--find-option-id options 'permission-allow))))
+  (let ((options '(((kind . "accept") (optionId . "a2")))))
+    (should (equal "a2" (agent-shell-to-go--find-option-id options 'permission-allow))))
+  (let ((options '(((kind . "allow_once") (optionId . "a3")))))
+    (should (equal "a3" (agent-shell-to-go--find-option-id options 'permission-allow)))))
+
+(ert-deftest agent-shell-to-go-test-bridge-find-option-id-always ()
+  "Returns optionId for always kind variants."
+  (let ((options '(((kind . "always") (optionId . "al1")))))
+    (should (equal "al1" (agent-shell-to-go--find-option-id options 'permission-always))))
+  (let ((options '(((kind . "alwaysAllow") (optionId . "al2")))))
+    (should (equal "al2" (agent-shell-to-go--find-option-id options 'permission-always))))
+  (let ((options '(((kind . "allow_always") (optionId . "al3")))))
+    (should (equal "al3" (agent-shell-to-go--find-option-id options 'permission-always)))))
+
+(ert-deftest agent-shell-to-go-test-bridge-find-option-id-reject ()
+  "Returns optionId for reject kind variants."
+  (let ((options '(((kind . "deny") (optionId . "r1")))))
+    (should (equal "r1" (agent-shell-to-go--find-option-id options 'permission-reject))))
+  (let ((options '(((kind . "reject") (optionId . "r2")))))
+    (should (equal "r2" (agent-shell-to-go--find-option-id options 'permission-reject))))
+  (let ((options '(((kind . "reject_once") (optionId . "r3")))))
+    (should (equal "r3" (agent-shell-to-go--find-option-id options 'permission-reject)))))
+
+(ert-deftest agent-shell-to-go-test-bridge-find-option-id-fallback-id ()
+  "Falls back to `id' key when `optionId' is absent."
+  (let ((options '(((kind . "allow") (id . "fallback-id")))))
+    (should (equal "fallback-id" (agent-shell-to-go--find-option-id options 'permission-allow)))))
+
+(ert-deftest agent-shell-to-go-test-bridge-find-option-id-no-match ()
+  "Returns nil when no option matches the action."
+  (let ((options '(((kind . "deny") (optionId . "r1")))))
+    (should (null (agent-shell-to-go--find-option-id options 'permission-allow))))
+  (should (null (agent-shell-to-go--find-option-id nil 'permission-allow))))
+
 (provide 'agent-shell-to-go-test-bridge)
 ;;; agent-shell-to-go-test-bridge.el ends here

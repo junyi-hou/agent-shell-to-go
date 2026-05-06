@@ -44,8 +44,12 @@
 (defvar-local agent-shell-to-go--tool-calls nil
   "Alist tracking tool calls by toolCallId (id → t if sent).")
 
-(defvar-local agent-shell-to-go--from-remote nil
-  "Non-nil when the current input originated from a remote transport.")
+(defvar-local agent-shell-to-go--remote-queued nil
+  "List of prompts injected from a remote transport, to suppress echo on submit.")
+
+(defvar-local agent-shell-to-go--restarting nil
+  "Non-nil when this buffer is being killed as part of a session restart.
+Suppresses the '_Session ended_' message in bridge-disable.")
 
 ; Global state 
 
@@ -56,6 +60,10 @@
   "Alist of pending permission requests.
 Key: (transport-name channel-id message-id)
 Value: plist with :request-id :buffer :options :command")
+
+(defvar agent-shell-to-go--inherit-state nil
+  "Plist of transport state for bridge-enable to inherit on a restarted session.
+Keys: :transport :channel-id :thread-id.  Consumed (set to nil) on first use.")
 
 ; Buffer lookup 
 
@@ -152,18 +160,16 @@ OPTIONS is forwarded to `agent-shell-to-go-transport-send-text'."
 (defun agent-shell-to-go--inject-message (text)
   "Inject TEXT into the current agent-shell buffer as if typed locally."
   (when (derived-mode-p 'agent-shell-mode)
+    ;; Track every remote-originated prompt so --on-send-command can skip
+    ;; mirroring it back (preventing echo), regardless of whether it is
+    ;; submitted immediately or dequeued later by agent-shell.
+    (push text agent-shell-to-go--remote-queued)
     (if (shell-maker-busy)
         (progn
           (agent-shell--enqueue-request :prompt text)
           (agent-shell-to-go--send
            (format "_Queued_: %s" (agent-shell-to-go--truncate-text text 100))))
-      (setq agent-shell-to-go--from-remote t)
-      ;; TODO: use `agent-shell-submit' to submit the text?
-      (save-excursion
-        (goto-char (point-max))
-        (insert text))
-      (goto-char (point-max))
-      (call-interactively #'shell-maker-submit))))
+      (agent-shell-insert :text text :submit t :no-focus t))))
 
 ; Permission helpers 
 
@@ -185,11 +191,24 @@ OPTIONS is forwarded to `agent-shell-to-go-transport-send-text'."
 (defun agent-shell-to-go--set-mode (buffer mode-id mode-name)
   "Set MODE-ID in BUFFER and notify the thread."
   (with-current-buffer buffer
-    (agent-shell--set-default-session-mode
-     :shell-buffer (get-buffer buffer)
-     :mode-id mode-id
-     :on-mode-changed
-     (lambda () (agent-shell-to-go--send (format "Mode: *%s*" mode-name))))))
+    (let ((session-id (map-nested-elt agent-shell--state '(:session :id))))
+      (if (not session-id)
+          (agent-shell-to-go--send "No active session")
+        (agent-shell--send-request
+         :state agent-shell--state
+         :client (map-elt agent-shell--state :client)
+         :request (acp-make-session-set-mode-request :session-id session-id :mode-id mode-id)
+         :buffer buffer
+         :on-success
+         (lambda (_)
+           (let ((session (map-elt agent-shell--state :session)))
+             (map-put! session :mode-id mode-id)
+             (map-put! agent-shell--state :session session))
+           (agent-shell--update-header-and-mode-line)
+           (agent-shell-to-go--send (format "Mode: *%s*" mode-name)))
+         :on-failure
+         (lambda (err _)
+           (agent-shell-to-go--send (format "Failed to set mode: %s" err))))))))
 
 ; !-command handler 
 
@@ -223,8 +242,8 @@ OPTIONS is forwarded to `agent-shell-to-go-transport-send-text'."
            "`!restart` — kill and restart agent\n"
            "`!queue` — show queued messages\n"
            "`!clearqueue` — clear queued messages\n"
-           "`!latest` — jump to bottom of thread\n"
-           "`!debug` — show session info"))
+           ;; "`!latest` — jump to bottom of thread\n"
+           "`!info` — show session info"))
          t)
         ("!queue"
          (let ((pending (map-elt agent-shell--state :pending-requests)))
@@ -249,10 +268,10 @@ OPTIONS is forwarded to `agent-shell-to-go-transport-send-text'."
                         ""
                       "s"))))
          t)
-        ("!latest"
-         (agent-shell-to-go--send "↓")
-         t)
-        ("!debug"
+        ;; ("!latest"
+        ;;  (agent-shell-to-go--send "↓")
+        ;;  t)
+        ("!info"
          (let* ((state agent-shell--state)
                 (session-id (map-nested-elt state '(:session :id)))
                 (mode-id (map-nested-elt state '(:session :mode-id)))
@@ -283,41 +302,31 @@ OPTIONS is forwarded to `agent-shell-to-go-transport-send-text'."
            (error
             (agent-shell-to-go--send (format "Stop failed: %s" err))))
          t)
-        ;; TODO: agent-shell now supports resuming, use that directly
         ("!restart"
          (condition-case err
-             (let* ((project-dir default-directory)
-                    (state agent-shell--state)
-                    (session-id (map-nested-elt state '(:session :id)))
-                    (transcript-dir
-                     (expand-file-name "transcripts"
-                                       (or (bound-and-true-p agent-shell-sessions-dir)
-                                           "~/.agent-shell")))
-                    (transcript-file
-                     (and session-id
-                          (expand-file-name (concat session-id ".md") transcript-dir)))
-                    (has-transcript
-                     (and transcript-file (file-exists-p transcript-file))))
+             (let* ((session-id (map-nested-elt agent-shell--state '(:session :id))))
+               (unless session-id
+                 (error "No active session to restart"))
+               (setq agent-shell-to-go--inherit-state
+                     (list
+                      :transport agent-shell-to-go--transport
+                      :channel-id agent-shell-to-go--channel-id
+                      :thread-id agent-shell-to-go--thread-id))
+               (setq agent-shell-to-go--restarting t)
                (agent-shell-to-go--send "Restarting agent…")
-               (ignore-errors
-                 (agent-shell-interrupt t))
                (run-at-time
-                1 nil
+                0.5 nil
                 (lambda ()
-                  (let ((default-directory project-dir))
-                    (save-window-excursion
-                      (funcall agent-shell-to-go-start-agent-function nil)
-                      (when has-transcript
-                        (run-at-time
-                         2 nil
-                         (lambda ()
-                           (when-let* ((new-buf
-                                        (car agent-shell-to-go--active-buffers)))
-                             (with-current-buffer new-buf
-                               (agent-shell-to-go--inject-message
-                                (format "Continue from previous session. Transcript: %s"
-                                        transcript-file))))))))))))
+                  (condition-case restart-err
+                      (progn
+                        (ignore-errors
+                          (agent-shell-interrupt t))
+                        (agent-shell-restart :session-id session-id))
+                    (error
+                     (setq agent-shell-to-go--inherit-state nil)
+                     (message "agent-shell-to-go: restart failed: %s" restart-err))))))
            (error
+            (setq agent-shell-to-go--inherit-state nil)
             (agent-shell-to-go--send (format "Restart failed: %s" err))))
          t)
         (_ nil)))))
@@ -325,12 +334,12 @@ OPTIONS is forwarded to `agent-shell-to-go-transport-send-text'."
 ; Inbound hook handlers (registered on message/reaction/slash hooks) 
 
 (cl-defun agent-shell-to-go--bridge-on-message
-    (&key transport channel thread-id text &allow-other-keys)
+    (&key transport channel-id thread-id text &allow-other-keys)
   "Handle an inbound message from a transport."
   (when-let* ((buffer
                (and thread-id
                     (agent-shell-to-go--find-buffer-for-transport-channel-thread
-                     transport channel
+                     transport channel-id
                      thread-id))))
     (with-current-buffer buffer
       (if (string-prefix-p "!" text)
@@ -338,16 +347,17 @@ OPTIONS is forwarded to `agent-shell-to-go-transport-send-text'."
         (agent-shell-to-go--inject-message text)))))
 
 (cl-defun agent-shell-to-go--bridge-on-reaction
-    (&key transport channel msg-id action added-p &allow-other-keys)
+    (&key transport channel-id msg-id action added-p &allow-other-keys)
   "Handle an inbound reaction from a transport.
 Presentation reactions are handled by the main dispatcher registered first.
 Here we only handle agent-state reactions."
   (when added-p
     (pcase action
+      ;; TODO: remove heart reaction
       ('heart
        (let* ((buffer
                (agent-shell-to-go--find-buffer-for-transport-channel-thread
-                transport channel
+                transport channel-id
                 nil))
               (thread-id
                (and buffer (buffer-local-value 'agent-shell-to-go--thread-id buffer)))
@@ -603,16 +613,15 @@ Here we only handle agent-state reactions."
 
 (defun agent-shell-to-go--on-send-command (orig-fn &rest args)
   "Advice around `agent-shell--send-command'.  Mirror user prompts."
-  (when (and agent-shell-to-go-mode
-             agent-shell-to-go--thread-id
-             (not agent-shell-to-go--from-remote))
-    (let ((prompt (plist-get args :prompt)))
-      (when prompt
+  (let ((prompt (plist-get args :prompt)))
+    (if (and prompt (member prompt agent-shell-to-go--remote-queued))
+        (setq agent-shell-to-go--remote-queued
+              (delete prompt agent-shell-to-go--remote-queued))
+      (when (and agent-shell-to-go-mode agent-shell-to-go--thread-id prompt)
         (agent-shell-to-go--send
          (agent-shell-to-go-transport-format-user-message
           agent-shell-to-go--transport prompt))
         (agent-shell-to-go--send "Processing..."))))
-  (setq agent-shell-to-go--from-remote nil)
   (setq agent-shell-to-go--current-agent-message nil)
   (apply orig-fn args))
 
@@ -792,19 +801,25 @@ Called via `agent-shell-subscribe-to' with the shell buffer current."
 
 (defun agent-shell-to-go--bridge-enable ()
   "Enable transport mirroring for this buffer."
-  (let* ((transport (agent-shell-to-go--default-transport))
+  (let* ((inherited agent-shell-to-go--inherit-state)
+         (_ (setq agent-shell-to-go--inherit-state nil))
+         (transport
+          (or (plist-get inherited :transport) (agent-shell-to-go--default-transport)))
          (project-path (agent-shell-to-go--get-project-path)))
     ;; Load credentials / connect if needed
     (unless (agent-shell-to-go-transport-connected-p transport)
       (agent-shell-to-go-transport-connect transport))
-    ;; Resolve channel
+    ;; Resolve channel (reuse inherited or create fresh)
     (setq agent-shell-to-go--transport transport)
     (setq agent-shell-to-go--channel-id
-          (agent-shell-to-go-transport-ensure-project-channel transport project-path))
-    ;; Start thread
+          (or (plist-get inherited :channel-id)
+              (agent-shell-to-go-transport-ensure-project-channel
+               transport project-path)))
+    ;; Start thread (reuse inherited or create fresh)
     (setq agent-shell-to-go--thread-id
-          (agent-shell-to-go-transport-start-thread
-           transport agent-shell-to-go--channel-id (buffer-name)))
+          (or (plist-get inherited :thread-id)
+              (agent-shell-to-go-transport-start-thread
+               transport agent-shell-to-go--channel-id (buffer-name))))
     ;; Track buffer
     (add-to-list 'agent-shell-to-go--active-buffers (current-buffer))
     ;; Add advice
@@ -871,7 +886,9 @@ Called via `agent-shell-subscribe-to' with the shell buffer current."
    agent-shell-to-go--turn-complete-subscription nil
    agent-shell-to-go--ready-subscription nil
    agent-shell-to-go--tool-call-update-subscription nil)
-  (when (and agent-shell-to-go--thread-id agent-shell-to-go--transport)
+  (when (and agent-shell-to-go--thread-id
+             agent-shell-to-go--transport
+             (not agent-shell-to-go--restarting))
     (when (and agent-shell-to-go-upload-transcript-on-end
                (bound-and-true-p agent-shell--transcript-file)
                (file-exists-p agent-shell--transcript-file))
