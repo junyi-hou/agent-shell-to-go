@@ -57,22 +57,6 @@ When nil, only status icons are shown (use expand reaction to reveal)."
   :type 'boolean
   :group 'agent-shell-to-go)
 
-(defcustom agent-shell-to-go-image-upload-rate-limit 30
-  "Maximum number of images to upload per minute.
-Set to nil to disable rate limiting."
-  :type '(choice (integer :tag "Max uploads per minute") (const :tag "No limit" nil))
-  :group 'agent-shell-to-go)
-
-(defcustom agent-shell-to-go-image-upload-rate-window 60
-  "Time window in seconds for rate limiting."
-  :type 'integer
-  :group 'agent-shell-to-go)
-
-(defcustom agent-shell-to-go-mentioned-file-ttl 14400
-  "Time in seconds to remember mentioned files for image upload filtering."
-  :type 'integer
-  :group 'agent-shell-to-go)
-
 (defcustom agent-shell-to-go-event-log-max-entries 200
   "Maximum number of entries to keep in the event log buffer."
   :type 'integer

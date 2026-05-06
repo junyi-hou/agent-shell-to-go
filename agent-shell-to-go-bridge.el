@@ -41,20 +41,8 @@
 (defvar-local agent-shell-to-go--tool-call-update-subscription nil
   "Subscription token for tool-call-update events.")
 
-(defvar-local agent-shell-to-go--file-watcher nil
-  "The fswatch process watching the project directory.")
-
-(defvar-local agent-shell-to-go--uploaded-images nil
-  "Hash table of image paths already uploaded (path → mtime float).")
-
-(defvar-local agent-shell-to-go--upload-timestamps nil
-  "List of recent upload timestamps for rate limiting.")
-
-(defvar-local agent-shell-to-go--mentioned-files nil
-  "Hash table of file paths mentioned in recent tool calls (path → time).")
-
 (defvar-local agent-shell-to-go--tool-calls nil
-  "Hash table tracking tool calls by toolCallId (id → t if sent).")
+  "Alist tracking tool calls by toolCallId (id → t if sent).")
 
 (defvar-local agent-shell-to-go--from-remote nil
   "Non-nil when the current input originated from a remote transport.")
@@ -69,12 +57,6 @@
 Key: (transport-name channel-id message-id)
 Value: plist with :request-id :buffer :options :command")
 
-; Constants 
-
-(defconst agent-shell-to-go--image-extensions
-  '("png" "jpg" "jpeg" "gif" "webp" "bmp" "svg")
-  "File extensions recognized as images.")
-
 ; Buffer lookup 
 
 (defun agent-shell-to-go--bridge-active-buffers ()
@@ -87,6 +69,7 @@ Value: plist with :request-id :buffer :options :command")
   (cl-find-if
    (lambda (buf)
      (and (buffer-live-p buf)
+          (process-live-p (get-buffer-process buf))
           (eq transport (buffer-local-value 'agent-shell-to-go--transport buf))
           (equal channel-id (buffer-local-value 'agent-shell-to-go--channel-id buf))
           (or (not thread-id)
@@ -94,151 +77,16 @@ Value: plist with :request-id :buffer :options :command")
                thread-id (buffer-local-value 'agent-shell-to-go--thread-id buf)))))
    agent-shell-to-go--active-buffers))
 
-(defun agent-shell-to-go--bridge-thread-active-p (transport channel thread-id)
-  "Return non-nil if THREAD-ID in CHANNEL on TRANSPORT has a live buffer."
+(defun agent-shell-to-go--bridge-thread-active-p (transport channel-id thread-id)
+  "Return non-nil if THREAD-ID in CHANNEL-ID on TRANSPORT has a live buffer."
   (cl-some
    (lambda (buf)
      (and (buffer-live-p buf)
+          (process-live-p (get-buffer-process buf))
           (eq transport (buffer-local-value 'agent-shell-to-go--transport buf))
-          (equal channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
+          (equal channel-id (buffer-local-value 'agent-shell-to-go--channel-id buf))
           (equal thread-id (buffer-local-value 'agent-shell-to-go--thread-id buf))))
    agent-shell-to-go--active-buffers))
-
-; Rate limiting 
-
-(defun agent-shell-to-go--check-upload-rate-limit ()
-  "Return t if an upload is allowed under the current rate limit."
-  (if (not agent-shell-to-go-image-upload-rate-limit)
-      t
-    (let* ((now (float-time))
-           (window (- now agent-shell-to-go-image-upload-rate-window)))
-      (setq agent-shell-to-go--upload-timestamps
-            (cl-remove-if
-             (lambda (ts) (< ts window)) agent-shell-to-go--upload-timestamps))
-      (< (length agent-shell-to-go--upload-timestamps)
-         agent-shell-to-go-image-upload-rate-limit))))
-
-(defun agent-shell-to-go--record-upload ()
-  "Record an upload timestamp for rate limiting."
-  (push (float-time) agent-shell-to-go--upload-timestamps))
-
-; Mentioned-file tracking 
-
-
-(defun agent-shell-to-go--record-mentioned-file (file-path)
-  "Record FILE-PATH as recently mentioned by this buffer's agent."
-  (unless agent-shell-to-go--mentioned-files
-    (setq agent-shell-to-go--mentioned-files (make-hash-table :test 'equal)))
-  (puthash file-path (float-time) agent-shell-to-go--mentioned-files))
-
-(defun agent-shell-to-go--file-was-mentioned-p (file-path)
-  "Return non-nil if FILE-PATH was recently mentioned by this buffer's agent."
-  (when agent-shell-to-go--mentioned-files
-    (let ((ts (gethash file-path agent-shell-to-go--mentioned-files)))
-      (and ts (< (- (float-time) ts) agent-shell-to-go-mentioned-file-ttl)))))
-
-; File path extraction from tool call updates 
-
-(defun agent-shell-to-go--extract-file-paths-from-update (update)
-  "Extract file paths from a tool call UPDATE alist."
-  (let ((paths nil)
-        (raw-input (alist-get 'rawInput update))
-        (content (alist-get 'content update)))
-    (when-let ((fp (alist-get 'file_path raw-input)))
-      (push fp paths))
-    (when-let ((p (alist-get 'path raw-input)))
-      (push p paths))
-    (when content
-      (let ((items
-             (cond
-              ((vectorp content)
-               (append content nil))
-              ((listp content)
-               content))))
-        (dolist (item items)
-          (when-let ((p (alist-get 'path item)))
-            (push p paths)))))
-    paths))
-
-; Image file detection 
-
-(defun agent-shell-to-go--image-file-p (path)
-  "Return non-nil if PATH has an image file extension."
-  (when (and path (stringp path))
-    (member
-     (downcase (or (file-name-extension path) ""))
-     agent-shell-to-go--image-extensions)))
-
-; File watcher 
-
-(defun agent-shell-to-go--handle-fswatch-output (buffer output)
-  "Handle fswatch OUTPUT, uploading new images for BUFFER."
-  (when (buffer-live-p buffer)
-    (dolist (file-path (split-string output "\n" t))
-      (when (and (agent-shell-to-go--image-file-p file-path)
-                 (file-exists-p file-path)
-                 (> (file-attribute-size (file-attributes file-path)) 0))
-        (with-current-buffer buffer
-          (when (agent-shell-to-go--file-was-mentioned-p file-path)
-            (unless agent-shell-to-go--uploaded-images
-              (setq agent-shell-to-go--uploaded-images (make-hash-table :test 'equal)))
-            (let* ((mtime
-                    (float-time
-                     (file-attribute-modification-time (file-attributes file-path))))
-                   (prev (gethash file-path agent-shell-to-go--uploaded-images)))
-              (when (or (not prev) (> mtime prev))
-                (if (not (agent-shell-to-go--check-upload-rate-limit))
-                    (agent-shell-to-go--debug "rate limit, skipping: %s" file-path)
-                  (puthash file-path mtime agent-shell-to-go--uploaded-images)
-                  (run-at-time
-                   0.5 nil
-                   (lambda ()
-                     (when (and (buffer-live-p buffer) (file-exists-p file-path))
-                       (with-current-buffer buffer
-                         (agent-shell-to-go--debug "uploading: %s" file-path)
-                         (agent-shell-to-go--record-upload)
-                         (agent-shell-to-go-transport-upload-file
-                          agent-shell-to-go--transport
-                          agent-shell-to-go--channel-id
-                          agent-shell-to-go--thread-id
-                          file-path
-                          (format ":frame_with_picture: `%s`"
-                                  (file-name-nondirectory file-path))))))))))))))))
-
-(defun agent-shell-to-go--start-file-watcher ()
-  "Start fswatch on the project directory for this buffer."
-  (agent-shell-to-go--stop-file-watcher)
-  (let ((project-dir (agent-shell-to-go--get-project-path))
-        (buffer (current-buffer)))
-    (when (and project-dir (file-directory-p project-dir))
-      (if (not (executable-find "fswatch"))
-          (agent-shell-to-go--debug "fswatch not found, image watching disabled")
-        (condition-case err
-            (let ((proc
-                   (start-process "agent-shell-to-go-fswatch" nil "fswatch"
-                                  "-r"
-                                  "--event"
-                                  "Created"
-                                  "--event"
-                                  "Updated"
-                                  project-dir)))
-              (set-process-filter
-               proc
-               (lambda (_p output)
-                 (agent-shell-to-go--handle-fswatch-output buffer output)))
-              (set-process-query-on-exit-flag proc nil)
-              (setq agent-shell-to-go--file-watcher proc)
-              (agent-shell-to-go--debug "fswatch started on %s" project-dir))
-          (error
-           (agent-shell-to-go--debug "fswatch failed: %s" err)))))))
-
-(defun agent-shell-to-go--stop-file-watcher ()
-  "Stop the fswatch process for this buffer."
-  (when (and agent-shell-to-go--file-watcher
-             (process-live-p agent-shell-to-go--file-watcher))
-    (ignore-errors
-      (kill-process agent-shell-to-go--file-watcher)))
-  (setq agent-shell-to-go--file-watcher nil))
 
 ; Diff extraction 
 
@@ -308,8 +156,9 @@ OPTIONS is forwarded to `agent-shell-to-go-transport-send-text'."
         (progn
           (agent-shell--enqueue-request :prompt text)
           (agent-shell-to-go--send
-           (format "_Queued: %s_" (agent-shell-to-go--truncate-text text 100))))
+           (format "_Queued_: %s" (agent-shell-to-go--truncate-text text 100))))
       (setq agent-shell-to-go--from-remote t)
+      ;; TODO: use `agent-shell-submit' to submit the text?
       (save-excursion
         (goto-char (point-max))
         (insert text))
@@ -434,6 +283,7 @@ OPTIONS is forwarded to `agent-shell-to-go-transport-send-text'."
            (error
             (agent-shell-to-go--send (format "Stop failed: %s" err))))
          t)
+        ;; TODO: agent-shell now supports resuming, use that directly
         ("!restart"
          (condition-case err
              (let* ((project-dir default-directory)
@@ -477,16 +327,15 @@ OPTIONS is forwarded to `agent-shell-to-go-transport-send-text'."
 (cl-defun agent-shell-to-go--bridge-on-message
     (&key transport channel thread-id text &allow-other-keys)
   "Handle an inbound message from a transport."
-  (let ((buffer
-         (and thread-id
-              (agent-shell-to-go--find-buffer-for-transport-channel-thread
-               transport channel
-               thread-id))))
-    (when buffer
-      (with-current-buffer buffer
-        (if (string-prefix-p "!" text)
-            (agent-shell-to-go--handle-command text buffer)
-          (agent-shell-to-go--inject-message text))))))
+  (when-let* ((buffer
+               (and thread-id
+                    (agent-shell-to-go--find-buffer-for-transport-channel-thread
+                     transport channel
+                     thread-id))))
+    (with-current-buffer buffer
+      (if (string-prefix-p "!" text)
+          (agent-shell-to-go--handle-command text buffer)
+        (agent-shell-to-go--inject-message text)))))
 
 (cl-defun agent-shell-to-go--bridge-on-reaction
     (&key transport channel msg-id action added-p &allow-other-keys)
@@ -800,8 +649,7 @@ Here we only handle agent-state reactions."
 
 (defun agent-shell-to-go--bridge-on-tool-call-update (event)
   "Handle a tool-call-update EVENT from agent-shell.
-Fires synchronously from within `agent-shell--on-notification', so
-buffer-local variables for the shell buffer are in scope."
+Called via `agent-shell-subscribe-to' with the shell buffer current."
   (when (and agent-shell-to-go-mode agent-shell-to-go--thread-id)
     (let* ((data (map-elt event :data))
            (tool-call-id (map-elt data :tool-call-id))
@@ -810,8 +658,6 @@ buffer-local variables for the shell buffer are in scope."
            (raw-input (map-elt tool-call :raw-input))
            (content (map-elt tool-call :content))
            (pseudo-update `((rawInput . ,raw-input) (content . ,content))))
-      (dolist (path (agent-shell-to-go--extract-file-paths-from-update pseudo-update))
-        (agent-shell-to-go--record-mentioned-file path))
       (if (member status '("completed" "failed"))
           (let* ((content-text
                   (and content
@@ -819,20 +665,29 @@ buffer-local variables for the shell buffer are in scope."
                                     (or (alist-get 'text (alist-get 'content item))
                                         (alist-get 'text item)
                                         ""))
-                                  (if (vectorp content) (append content nil)
-                                    (if (listp content) content nil))
+                                  (if (vectorp content)
+                                      (append content nil)
+                                    (if (listp content)
+                                        content
+                                      nil))
                                   "\n")))
                  (output content-text)
-                 (diff (condition-case nil
-                           (agent-shell-to-go--extract-diff pseudo-update)
-                         (error nil)))
+                 (diff
+                  (condition-case nil
+                      (agent-shell-to-go--extract-diff pseudo-update)
+                    (error
+                     nil)))
                  (diff-text
                   (and diff
                        (condition-case nil
                            (agent-shell-to-go-transport-format-diff
                             agent-shell-to-go--transport (car diff) (cdr diff))
-                         (error nil))))
-                 (icon (if (equal status "completed") "[ok]" "[fail]")))
+                         (error
+                          nil))))
+                 (icon
+                  (if (equal status "completed")
+                      "[ok]"
+                    "[fail]")))
             (cond
              ((and diff-text (> (length diff-text) 0))
               (let ((full (format "%s\n%s" icon diff-text)))
@@ -843,10 +698,13 @@ buffer-local variables for the shell buffer are in scope."
                       (agent-shell-to-go--save-truncated-message
                        agent-shell-to-go--transport
                        agent-shell-to-go--channel-id
-                       msg-id full icon))))))
+                       msg-id
+                       full
+                       icon))))))
              ((and output (stringp output) (> (length output) 0))
-              (let ((full (agent-shell-to-go-transport-format-tool-call-result
-                           agent-shell-to-go--transport "output" status output)))
+              (let ((full
+                     (agent-shell-to-go-transport-format-tool-call-result
+                      agent-shell-to-go--transport "output" status output)))
                 (if agent-shell-to-go-show-tool-output
                     (agent-shell-to-go--send full '(:truncate t))
                   (let ((msg-id (agent-shell-to-go--send icon)))
@@ -854,19 +712,21 @@ buffer-local variables for the shell buffer are in scope."
                       (agent-shell-to-go--save-truncated-message
                        agent-shell-to-go--transport
                        agent-shell-to-go--channel-id
-                       msg-id full icon))))))
-             (t (agent-shell-to-go--send icon))))
+                       msg-id
+                       full
+                       icon))))))
+             (t
+              (agent-shell-to-go--send icon))))
         ;; Tool call started — flush any buffered agent text first, then notify
-        (unless agent-shell-to-go--tool-calls
-          (setq agent-shell-to-go--tool-calls (make-hash-table :test 'equal)))
         (let* ((title (map-elt tool-call :title))
                (command (alist-get 'command raw-input))
                (file-path (alist-get 'file_path raw-input))
                (query (alist-get 'query raw-input))
                (url (alist-get 'url raw-input))
                (specific (or command file-path query url))
-               (already-sent (and tool-call-id
-                                  (gethash tool-call-id agent-shell-to-go--tool-calls))))
+               (already-sent
+                (and tool-call-id
+                     (map-elt agent-shell-to-go--tool-calls tool-call-id))))
           (when (and specific (not already-sent))
             (when (and agent-shell-to-go--current-agent-message
                        (> (length agent-shell-to-go--current-agent-message) 0))
@@ -874,25 +734,37 @@ buffer-local variables for the shell buffer are in scope."
                (agent-shell-to-go-transport-format-agent-message
                 agent-shell-to-go--transport agent-shell-to-go--current-agent-message))
               (setq agent-shell-to-go--current-agent-message nil))
-            (puthash tool-call-id t agent-shell-to-go--tool-calls)
+            (map-put! agent-shell-to-go--tool-calls tool-call-id t)
             (let* ((title-has-specific
                     (and title specific (string-match-p (regexp-quote specific) title)))
                    (display
                     (cond
-                     (command command)
-                     (title-has-specific title)
-                     ((and file-path title) (format "%s: %s" title file-path))
-                     ((and query title) (format "%s: %s" title query))
-                     ((and url title) (format "%s: %s" title url))
-                     (specific specific)
-                     (t title)))
-                   (diff (condition-case nil
-                             (agent-shell-to-go--extract-diff pseudo-update)
-                           (error nil)))
+                     (command
+                      command)
+                     (title-has-specific
+                      title)
+                     ((and file-path title)
+                      (format "%s: %s" title file-path))
+                     ((and query title)
+                      (format "%s: %s" title query))
+                     ((and url title)
+                      (format "%s: %s" title url))
+                     (specific
+                      specific)
+                     (t
+                      title)))
+                   (diff
+                    (condition-case nil
+                        (agent-shell-to-go--extract-diff pseudo-update)
+                      (error
+                       nil)))
                    (diff-text
                     (and diff
-                         (agent-shell-to-go-transport-format-diff
-                          agent-shell-to-go--transport (car diff) (cdr diff)))))
+                         (condition-case nil
+                             (agent-shell-to-go-transport-format-diff
+                              agent-shell-to-go--transport (car diff) (cdr diff))
+                           (error
+                            nil)))))
               (condition-case err
                   (if (and diff-text (> (length diff-text) 0))
                       (agent-shell-to-go--send
@@ -905,7 +777,8 @@ buffer-local variables for the shell buffer are in scope."
                      (agent-shell-to-go-transport-format-tool-call-start
                       agent-shell-to-go--transport display)
                      '(:truncate t)))
-                (error (agent-shell-to-go--debug "tool_call send error: %s" err))))))))))
+                (error
+                 (agent-shell-to-go--debug "tool_call send error: %s" err))))))))))
 
 
 ; Hook registration 
@@ -962,7 +835,8 @@ buffer-local variables for the shell buffer are in scope."
                           (> (length agent-shell-to-go--current-agent-message) 0))
                  (agent-shell-to-go--send
                   (agent-shell-to-go-transport-format-agent-message
-                   agent-shell-to-go--transport agent-shell-to-go--current-agent-message))
+                   agent-shell-to-go--transport
+                   agent-shell-to-go--current-agent-message))
                  (setq agent-shell-to-go--current-agent-message nil))
                (when agent-shell-to-go--thread-id
                  (agent-shell-to-go--send "_Ready for input_"))))))
@@ -972,8 +846,6 @@ buffer-local variables for the shell buffer are in scope."
            :shell-buffer (current-buffer)
            :event 'tool-call-update
            :on-event #'agent-shell-to-go--bridge-on-tool-call-update))
-    ;; Start file watcher
-    (agent-shell-to-go--start-file-watcher)
     ;; Kill hook
     (add-hook 'kill-buffer-hook #'agent-shell-to-go--on-buffer-kill nil t)
     (agent-shell-to-go--debug
@@ -987,14 +859,18 @@ buffer-local variables for the shell buffer are in scope."
 (defun agent-shell-to-go--bridge-disable ()
   "Disable transport mirroring for this buffer."
   (remove-hook 'kill-buffer-hook #'agent-shell-to-go--on-buffer-kill t)
-  (agent-shell-to-go--stop-file-watcher)
-  (dolist (sub (list agent-shell-to-go--turn-complete-subscription
-                     agent-shell-to-go--ready-subscription
-                     agent-shell-to-go--tool-call-update-subscription))
-    (when sub (ignore-errors (agent-shell-unsubscribe :subscription sub))))
-  (setq agent-shell-to-go--turn-complete-subscription nil
-        agent-shell-to-go--ready-subscription nil
-        agent-shell-to-go--tool-call-update-subscription nil)
+  (dolist (sub
+           (list
+            agent-shell-to-go--turn-complete-subscription
+            agent-shell-to-go--ready-subscription
+            agent-shell-to-go--tool-call-update-subscription))
+    (when sub
+      (ignore-errors
+        (agent-shell-unsubscribe :subscription sub))))
+  (setq
+   agent-shell-to-go--turn-complete-subscription nil
+   agent-shell-to-go--ready-subscription nil
+   agent-shell-to-go--tool-call-update-subscription nil)
   (when (and agent-shell-to-go--thread-id agent-shell-to-go--transport)
     (when (and agent-shell-to-go-upload-transcript-on-end
                (bound-and-true-p agent-shell--transcript-file)
@@ -1038,7 +914,6 @@ buffer-local variables for the shell buffer are in scope."
                transport agent-shell-to-go--channel-id (buffer-name)))
         (unless (memq buf agent-shell-to-go--active-buffers)
           (add-to-list 'agent-shell-to-go--active-buffers buf))
-        (agent-shell-to-go--start-file-watcher)
         (advice-add
          'agent-shell--send-command
          :around #'agent-shell-to-go--on-send-command)
@@ -1047,10 +922,14 @@ buffer-local variables for the shell buffer are in scope."
          :around #'agent-shell-to-go--on-notification)
         (advice-add 'agent-shell--on-request :around #'agent-shell-to-go--on-request)
         ;; Refresh subscriptions for the new thread
-        (dolist (sub (list agent-shell-to-go--turn-complete-subscription
-                           agent-shell-to-go--ready-subscription
-                           agent-shell-to-go--tool-call-update-subscription))
-          (when sub (ignore-errors (agent-shell-unsubscribe :subscription sub))))
+        (dolist (sub
+                 (list
+                  agent-shell-to-go--turn-complete-subscription
+                  agent-shell-to-go--ready-subscription
+                  agent-shell-to-go--tool-call-update-subscription))
+          (when sub
+            (ignore-errors
+              (agent-shell-unsubscribe :subscription sub))))
         (setq agent-shell-to-go--turn-complete-subscription
               (agent-shell-subscribe-to
                :shell-buffer buf
@@ -1068,7 +947,8 @@ buffer-local variables for the shell buffer are in scope."
                               (> (length agent-shell-to-go--current-agent-message) 0))
                      (agent-shell-to-go--send
                       (agent-shell-to-go-transport-format-agent-message
-                       agent-shell-to-go--transport agent-shell-to-go--current-agent-message))
+                       agent-shell-to-go--transport
+                       agent-shell-to-go--current-agent-message))
                      (setq agent-shell-to-go--current-agent-message nil))
                    (when agent-shell-to-go--thread-id
                      (agent-shell-to-go--send "_Ready for input_"))))))

@@ -156,11 +156,6 @@ Make sure this file is gitignored if your config is in a repository.
 
 Requires the `websocket` package (available on MELPA).
 
-For automatic image uploads, install fswatch:
-```bash
-brew install fswatch  # macOS
-```
-
 ## Usage
 
 Once set up, every new agent-shell session automatically creates a Slack thread and mirrors your conversation bidirectionally.
@@ -239,9 +234,6 @@ Long messages are automatically truncated to 500 characters. Add 👀 to see mor
 
 ;; Directory for bookmark TODOs (default: ~/org/todo/)
 (setq agent-shell-to-go-todo-directory "~/org/todo/")
-
-;; Image upload rate limit (default: 30 per minute, nil to disable)
-(setq agent-shell-to-go-image-upload-rate-limit 30)
 
 ;; Hide tool call outputs by default (just show ✅/❌)
 (setq agent-shell-to-go-show-tool-output nil)

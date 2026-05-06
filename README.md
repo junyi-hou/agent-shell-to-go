@@ -32,7 +32,6 @@ Planned/possible integrations:
 - Permission requests with reaction-based approval
 - Mode switching via commands (`!yolo`, `!safe`, `!plan`)
 - Start new agents remotely via slash commands
-- **Image uploads** - images created anywhere in the project are automatically uploaded to Slack (requires `fswatch`)
 - **Error forwarding** - agent startup failures and API errors are automatically reported to the Slack thread
 - Works with any agent-shell agent (Claude Code, Gemini, etc.)
 
@@ -43,7 +42,6 @@ Planned/possible integrations:
 
 ## Roadmap
 
-- [x] Image uploads - images written by the agent are automatically uploaded to Slack
 - [x] Bookmarks - bookmark reaction creates org-mode TODO scheduled for today
 - [x] Better UTF-8 and unicode handling (now uses curl)
 - [x] Per-project channels - each project gets its own Slack channel automatically
