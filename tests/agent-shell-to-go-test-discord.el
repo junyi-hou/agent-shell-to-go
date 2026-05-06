@@ -47,8 +47,6 @@
   (should (eq 'permission-always (agent-shell-to-go--discord-emoji-to-action "star")))
   (should (eq 'permission-reject (agent-shell-to-go--discord-emoji-to-action "x")))
   (should (eq 'permission-reject (agent-shell-to-go--discord-emoji-to-action "thumbsdown")))
-  (should (eq 'heart (agent-shell-to-go--discord-emoji-to-action "heart")))
-  (should (eq 'heart (agent-shell-to-go--discord-emoji-to-action "heart_eyes")))
   (should (eq 'bookmark (agent-shell-to-go--discord-emoji-to-action "bookmark"))))
 
 (ert-deftest agent-shell-to-go-test-discord-emoji-to-action-unknown ()

@@ -91,7 +91,6 @@ The reaction map uses custom server emoji names. To enable reactions, create ser
 | `white_check_mark`, `thumbsup` | Allow tool permission |
 | `unlock`, `star` | Always allow |
 | `x`, `thumbsdown` | Reject |
-| `heart`, `heart_eyes` | Send appreciation |
 | `bookmark` | Create org TODO |
 
 Server Settings → Emoji → Upload Emoji, then name each one exactly as shown above.

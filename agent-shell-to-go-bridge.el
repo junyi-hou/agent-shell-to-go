@@ -353,22 +353,6 @@ Presentation reactions are handled by the main dispatcher registered first.
 Here we only handle agent-state reactions."
   (when added-p
     (pcase action
-      ;; TODO: remove heart reaction
-      ('heart
-       (let* ((buffer
-               (agent-shell-to-go--find-buffer-for-transport-channel-thread
-                transport channel-id
-                nil))
-              (thread-id
-               (and buffer (buffer-local-value 'agent-shell-to-go--thread-id buffer)))
-              (message-text
-               (and buffer
-                    (agent-shell-to-go-transport-get-message-text
-                     transport channel msg-id))))
-         (when (and buffer message-text)
-           (with-current-buffer buffer
-             (agent-shell-to-go--inject-message
-              (format "The user heart reacted to: %s" message-text))))))
       ('bookmark (agent-shell-to-go--handle-bookmark-reaction transport channel msg-id))
       ((or 'permission-allow 'permission-always 'permission-reject)
        (agent-shell-to-go--handle-permission-reaction

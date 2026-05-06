@@ -321,7 +321,6 @@ Later lookups via `agent-shell-to-go-get-transport' return TRANSPORT."
     permission-allow
     permission-always
     permission-reject
-    heart
     bookmark)
   "Closed set of canonical reaction action symbols.
 Transports map raw reactions to these when firing the reaction hook.")

@@ -109,14 +109,6 @@ Keys read: SLACK_BOT_TOKEN, SLACK_APP_TOKEN, SLACK_CHANNEL_ID, SLACK_USER_ID."
     (permission-allow . ("white_check_mark" "+1"))
     (permission-always . ("unlock" "star"))
     (permission-reject . ("x" "-1"))
-    (heart
-     .
-     ("heart"
-      "heart_eyes"
-      "heartpulse"
-      "sparkling_heart"
-      "two_hearts"
-      "revolving_hearts"))
     (bookmark . ("bookmark")))
   "Map canonical action symbols to lists of Slack emoji names.
 Used to translate raw Slack reactions to canonical hook actions."

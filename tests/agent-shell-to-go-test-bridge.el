@@ -368,23 +368,6 @@
 
 ; Inbound reaction hook 
 
-(ert-deftest agent-shell-to-go-test-bridge-reaction-heart ()
-  "Heart reaction injects a message referencing the reacted-to text."
-  (let* ((tr (agent-shell-to-go-test-make))
-         (buf (agent-shell-to-go-test--make-bridge-buffer tr))
-         (msg-id (agent-shell-to-go-transport-send-text
-                  tr "test-channel" "test-thread" "great work"))
-         (injected nil))
-    (unwind-protect
-        (cl-letf (((symbol-function 'agent-shell-to-go--inject-message)
-                   (lambda (text) (setq injected text))))
-          (agent-shell-to-go-test-fire-reaction
-           tr "test-channel" msg-id "u1" 'heart t)
-          (should (stringp injected))
-          (should (string-match-p "heart reacted" injected))
-          (should (string-match-p "great work" injected)))
-      (agent-shell-to-go-test--cleanup-buffer buf))))
-
 (ert-deftest agent-shell-to-go-test-bridge-reaction-permission-allow ()
   "permission-allow reaction calls send-permission-response with the allow option-id."
   (let* ((tr (agent-shell-to-go-test-make))

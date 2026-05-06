@@ -211,7 +211,6 @@ Use these in the channel (not in threads):
 
 | Emoji | Action |
 |-------|--------|
-| ❤️ (or other hearts) | Send appreciation to the agent |
 | 🔖 | Create an org-mode TODO from the message |
 
 Long messages are automatically truncated to 500 characters. Add 👀 to see more, 📖 for the full text.

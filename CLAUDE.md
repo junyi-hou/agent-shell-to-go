@@ -50,7 +50,7 @@ Three hook variables; transports fire them with normalized plists:
 - `agent-shell-to-go-slash-command-hook` `:transport :command :args :args-text :channel :user :interaction-token`
 
 Reaction `:action` is a canonical symbol from:
-`hide expand-truncated expand-full permission-allow permission-always permission-reject heart bookmark`
+`hide expand-truncated expand-full permission-allow permission-always permission-reject bookmark`
 
 ### Reaction canonicalization (Slack)
 
@@ -63,7 +63,7 @@ to lists of raw Slack emoji names.
   reaction hook first.  Presentation actions (hide/expand/collapse) are handled
   entirely here; bridge never sees them.
 - **bridge** registers message/reaction/slash handlers.  Reaction handler only
-  processes `heart`, `bookmark`, and `permission-*` actions.
+  processes `bookmark` and `permission-*` actions.
 
 ## Key State
 
