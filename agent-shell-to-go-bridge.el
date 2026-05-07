@@ -41,6 +41,12 @@
 (defvar-local agent-shell-to-go--tool-call-update-subscription nil
   "Subscription token for tool-call-update events.")
 
+(defvar-local agent-shell-to-go--init-client-subscription nil
+  "Subscription token for init-client events (failure detection).")
+
+(defvar-local agent-shell-to-go--error-subscription nil
+  "Subscription token for error events.")
+
 (defvar-local agent-shell-to-go--tool-calls nil
   "Alist tracking tool calls by toolCallId (id → t if sent).")
 
@@ -134,8 +140,7 @@ Keys: :transport :channel-id :thread-id.  Consumed (set to nil) on first use.")
             (list content)))))
     (cond
      ((and content-list
-           (seq-find
-            (lambda (item) (equal (map-elt item 'type) "diff")) content-list))
+           (seq-find (lambda (item) (equal (map-elt item 'type) "diff")) content-list))
       (let ((di
              (seq-find
               (lambda (item) (equal (map-elt item 'type) "diff")) content-list)))
@@ -185,9 +190,8 @@ where each entry is a plist with :kind and :option-id."
            ('permission-allow '("allow" "accept" "allow_once"))
            ('permission-always '("always" "alwaysAllow" "allow_always"))
            ('permission-reject '("deny" "reject" "reject_once")))))
-    (when-let* ((opt (seq-find
-                      (lambda (opt) (member (map-elt opt :kind) kinds))
-                      options)))
+    (when-let* ((opt
+                 (seq-find (lambda (opt) (member (map-elt opt :kind) kinds)) options)))
       (map-elt opt :option-id))))
 
 ; Set agent mode helper 
@@ -443,9 +447,10 @@ Presentation reactions are handled by the main dispatcher registered first."
            (file-name-directory f)))
        (buffer-list)))))))
 
-; Session title fetch (ACP) 
+; agent shell subscriptions 
 
-(defun agent-shell-to-go--fetch-session-title ()
+;; TODO: use the new session-title-changed event
+(defun agent-shell-to-go--fetch-session-title (_event)
   "Fetch session title via ACP and update the thread header."
   (when (and (not agent-shell-to-go--thread-title-updated)
              agent-shell-to-go--thread-id
@@ -481,7 +486,17 @@ Presentation reactions are handled by the main dispatcher registered first."
          (lambda (_err _raw)
            (agent-shell-to-go--debug "failed to fetch session title")))))))
 
-; Advice functions 
+(defun agent-shell-to-go--on-turn-complete (_event)
+  "Flush buffered agent message and send ready signal."
+  (when agent-shell-to-go-mode
+    (when (and agent-shell-to-go--current-agent-message
+               (> (length agent-shell-to-go--current-agent-message) 0))
+      (agent-shell-to-go--send
+       (agent-shell-to-go-transport-format-agent-message
+        agent-shell-to-go--transport agent-shell-to-go--current-agent-message))
+      (setq agent-shell-to-go--current-agent-message nil))
+    (when agent-shell-to-go--thread-id
+      (agent-shell-to-go--send "_Ready for input_"))))
 
 (defun agent-shell-to-go--permission-responder (permission)
   "Handle a PERMISSION request by notifying the remote transport.
@@ -491,27 +506,30 @@ is not ready.  Returns t to suppress the Emacs permission UI."
   (if (and agent-shell-to-go-mode
            agent-shell-to-go--transport
            agent-shell-to-go--thread-id)
-      (let* ((tool-call (map-elt permission :tool-call))
-             (options (map-elt permission :options))
-             (respond (map-elt permission :respond))
-             (title (or (map-elt tool-call :title) "Unknown action"))
-             (msg-id
-              (condition-case err
-                  (agent-shell-to-go-transport-send-text
-                   agent-shell-to-go--transport
-                   agent-shell-to-go--channel-id
-                   agent-shell-to-go--thread-id
-                   (format "*Permission Required*\n`%s`\n\nReact to approve, deny, or always allow."
-                           title))
-                (error
-                 (message "agent-shell-to-go permission notify error: %s" err)
-                 nil))))
+      (let*
+          ((tool-call (map-elt permission :tool-call))
+           (options (map-elt permission :options))
+           (respond (map-elt permission :respond))
+           (title (or (map-elt tool-call :title) "Unknown action"))
+           (msg-id
+            (condition-case err
+                (agent-shell-to-go-transport-send-text
+                 agent-shell-to-go--transport
+                 agent-shell-to-go--channel-id
+                 agent-shell-to-go--thread-id
+                 (format
+                  "*Permission Required*\n`%s`\n\nReact to approve, deny, or always allow."
+                  title))
+              (error
+               (message "agent-shell-to-go permission notify error: %s" err)
+               nil))))
         (if msg-id
             (progn
               (push (cons
-                     (list (agent-shell-to-go-transport-name agent-shell-to-go--transport)
-                           agent-shell-to-go--channel-id
-                           msg-id)
+                     (list
+                      (agent-shell-to-go-transport-name
+                       agent-shell-to-go--transport)
+                      agent-shell-to-go--channel-id msg-id)
                      (list :respond respond :options options))
                     agent-shell-to-go--pending-permissions)
               t)
@@ -534,18 +552,22 @@ is not ready.  Returns t to suppress the Emacs permission UI."
   (setq agent-shell-to-go--current-agent-message nil)
   (apply orig-fn args))
 
-(cl-defun agent-shell-to-go--on-client-initialized (&key shell)
-  "After-advice for `agent-shell--initialize-client'.  Forward failures."
-  (let ((buffer (map-elt agent-shell--state :buffer)))
-    (when (and buffer
-               (buffer-live-p buffer)
-               (buffer-local-value 'agent-shell-to-go-mode buffer)
-               (not (map-elt agent-shell--state :client)))
-      (with-current-buffer buffer
-        (when agent-shell-to-go--thread-id
-          (agent-shell-to-go--send
-           "*Agent failed to start* — check API key / OAuth token"))))))
+(defun agent-shell-to-go--on-init-client (_event)
+  "Handle init-client event.  Send failure notice if client was not created."
+  (when (and agent-shell-to-go-mode
+             agent-shell-to-go--thread-id
+             (not (map-elt agent-shell--state :client)))
+    (agent-shell-to-go--send "*Agent failed to start* — check API key / OAuth token")))
 
+(defun agent-shell-to-go--on-error (event)
+  "Handle error event.  Forward the error message to the remote transport."
+  (when (and agent-shell-to-go-mode agent-shell-to-go--thread-id)
+    (let* ((data (map-elt event :data))
+           (code (map-elt data :code))
+           (message (map-elt data :message)))
+      (agent-shell-to-go--send (format "*Agent error* — %s: %s" code message)))))
+
+;; there is no event available on notification so we use this
 (defun agent-shell-to-go--on-notification (orig-fn &rest args)
   "Advice around `agent-shell--on-notification'.  Accumulate agent message chunks."
   (let* ((state (map-elt args :state))
@@ -741,33 +763,30 @@ Called via `agent-shell-subscribe-to' with the shell buffer current."
     (advice-add
      'agent-shell--on-notification
      :around #'agent-shell-to-go--on-notification)
-    (advice-add
-     'agent-shell--initialize-client
-     :after #'agent-shell-to-go--on-client-initialized)
+    ;; Subscribe to init-client to detect client creation failure
+    (setq agent-shell-to-go--init-client-subscription
+          (agent-shell-subscribe-to
+           :shell-buffer (current-buffer)
+           :event 'init-client
+           :on-event #'agent-shell-to-go--on-init-client))
+    ;; Subscribe to error events and forward to remote transport
+    (setq agent-shell-to-go--error-subscription
+          (agent-shell-subscribe-to
+           :shell-buffer (current-buffer)
+           :event 'error
+           :on-event #'agent-shell-to-go--on-error))
     ;; Subscribe to turn-complete for session title
     (setq agent-shell-to-go--turn-complete-subscription
           (agent-shell-subscribe-to
            :shell-buffer (current-buffer)
            :event 'turn-complete
-           :on-event
-           (lambda (_event) (agent-shell-to-go--fetch-session-title))))
+           :on-event #'agent-shell-to-go--fetch-session-title))
     ;; Subscribe to turn-complete for flush + ready signal
     (setq agent-shell-to-go--ready-subscription
           (agent-shell-subscribe-to
            :shell-buffer (current-buffer)
            :event 'turn-complete
-           :on-event
-           (lambda (_event)
-             (when agent-shell-to-go-mode
-               (when (and agent-shell-to-go--current-agent-message
-                          (> (length agent-shell-to-go--current-agent-message) 0))
-                 (agent-shell-to-go--send
-                  (agent-shell-to-go-transport-format-agent-message
-                   agent-shell-to-go--transport
-                   agent-shell-to-go--current-agent-message))
-                 (setq agent-shell-to-go--current-agent-message nil))
-               (when agent-shell-to-go--thread-id
-                 (agent-shell-to-go--send "_Ready for input_"))))))
+           :on-event #'agent-shell-to-go--on-turn-complete))
     ;; Subscribe to tool-call-update for tool call mirroring
     (setq agent-shell-to-go--tool-call-update-subscription
           (agent-shell-subscribe-to
@@ -789,6 +808,8 @@ Called via `agent-shell-subscribe-to' with the shell buffer current."
   (remove-hook 'kill-buffer-hook #'agent-shell-to-go--on-buffer-kill t)
   (dolist (sub
            (list
+            agent-shell-to-go--init-client-subscription
+            agent-shell-to-go--error-subscription
             agent-shell-to-go--turn-complete-subscription
             agent-shell-to-go--ready-subscription
             agent-shell-to-go--tool-call-update-subscription))
@@ -796,6 +817,8 @@ Called via `agent-shell-subscribe-to' with the shell buffer current."
       (ignore-errors
         (agent-shell-unsubscribe :subscription sub))))
   (setq
+   agent-shell-to-go--init-client-subscription nil
+   agent-shell-to-go--error-subscription nil
    agent-shell-to-go--turn-complete-subscription nil
    agent-shell-to-go--ready-subscription nil
    agent-shell-to-go--tool-call-update-subscription nil)
@@ -819,9 +842,7 @@ Called via `agent-shell-subscribe-to' with the shell buffer current."
         (delete (current-buffer) agent-shell-to-go--active-buffers))
   (unless agent-shell-to-go--active-buffers
     (advice-remove 'agent-shell--send-command #'agent-shell-to-go--on-send-command)
-    (advice-remove 'agent-shell--on-notification #'agent-shell-to-go--on-notification)
-    (advice-remove
-     'agent-shell--initialize-client #'agent-shell-to-go--on-client-initialized))
+    (advice-remove 'agent-shell--on-notification #'agent-shell-to-go--on-notification))
   (agent-shell-to-go--debug "bridge disabled"))
 
 (defun agent-shell-to-go--bridge-reconnect-buffer (&optional buffer)
@@ -873,18 +894,7 @@ Called via `agent-shell-subscribe-to' with the shell buffer current."
               (agent-shell-subscribe-to
                :shell-buffer buf
                :event 'turn-complete
-               :on-event
-               (lambda (_event)
-                 (when agent-shell-to-go-mode
-                   (when (and agent-shell-to-go--current-agent-message
-                              (> (length agent-shell-to-go--current-agent-message) 0))
-                     (agent-shell-to-go--send
-                      (agent-shell-to-go-transport-format-agent-message
-                       agent-shell-to-go--transport
-                       agent-shell-to-go--current-agent-message))
-                     (setq agent-shell-to-go--current-agent-message nil))
-                   (when agent-shell-to-go--thread-id
-                     (agent-shell-to-go--send "_Ready for input_"))))))
+               :on-event #'agent-shell-to-go--on-turn-complete))
         (setq agent-shell-to-go--tool-call-update-subscription
               (agent-shell-subscribe-to
                :shell-buffer buf
