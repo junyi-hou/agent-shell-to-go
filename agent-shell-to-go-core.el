@@ -560,8 +560,7 @@ Closes any existing socket first."
 ; Slash command arg schemas
 
 (defconst agent-shell-to-go--slash-command-schemas
-  '(("/new-agent" (:folder string :container-p nil))
-    ("/new-agent-container" (:folder string :container-p t-literal))
+  '(("/new-agent" (:folder string))
     ("/new-project" (:project-name string))
     ("/projects" ()))
   "Per-command arg schemas for transports that need to parse text args.
@@ -571,13 +570,10 @@ converting raw text to a typed args plist for the slash-command hook.")
 (defun agent-shell-to-go--parse-slash-args (command text)
   "Parse TEXT into a typed args plist for COMMAND using the schema.
 Returns nil if no schema is found; the caller keeps :args-text either way."
-  (let ((_schema (cadr (assoc command agent-shell-to-go--slash-command-schemas)))
-        (text (and text (string-trim text))))
+  (let ((text (and text (string-trim text))))
     (pcase command
       ("/new-agent"
-       (list :folder (and text (not (string-empty-p text)) text) :container-p nil))
-      ("/new-agent-container"
-       (list :folder (and text (not (string-empty-p text)) text) :container-p t))
+       (list :folder (and text (not (string-empty-p text)) text)))
       ("/new-project" (list :project-name (and text (not (string-empty-p text)) text)))
       ("/projects" nil)
       (_ nil))))

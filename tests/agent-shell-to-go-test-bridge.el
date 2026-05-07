@@ -274,34 +274,31 @@
             (should (string-match-p "\\[fail\\]" (car texts)))))
       (agent-shell-to-go-test--cleanup-buffer buf))))
 
-; --on-request: permission 
+; --permission-responder
 
-(ert-deftest agent-shell-to-go-test-bridge-on-request-permission ()
-  "Permission request sends warning and registers in pending-permissions."
+(ert-deftest agent-shell-to-go-test-bridge-permission-responder ()
+  "Permission responder sends notice, registers :respond/:options in pending-permissions, returns t."
   (let* ((tr (agent-shell-to-go-test-make))
          (buf (agent-shell-to-go-test--make-bridge-buffer tr))
-         (state (buffer-local-value 'agent-shell--state buf))
+         (respond-fn (lambda (_id) nil))
+         (options (list (list :kind "allow" :option-id "o-allow")
+                        (list :kind "deny" :option-id "o-deny")))
          (agent-shell-to-go--pending-permissions nil))
     (unwind-protect
-        (progn
-          (agent-shell-to-go--on-request
-           (lambda (&rest _) nil)
-           :state state
-           :acp-request
-           `((id . "req1")
-             (method . "session/request_permission")
-             (params . ((toolCall . ((title . "Bash")
-                                     (rawInput . ((command . "rm -rf /tmp/test")))))
-                         (options . [((kind . "allow") (optionId . "o-allow"))
-                                     ((kind . "deny") (optionId . "o-deny"))])))))
-          (let ((texts (agent-shell-to-go-test--sent-texts tr)))
-            (should (= 1 (length texts)))
-            (should (string-match-p "Permission Required" (car texts)))
-            (should (string-match-p "rm -rf /tmp/test" (car texts))))
-          (should (= 1 (length agent-shell-to-go--pending-permissions)))
-          (let ((info (cdar agent-shell-to-go--pending-permissions)))
-            (should (equal "req1" (map-elt info :request-id)))
-            (should (eq buf (map-elt info :buffer)))))
+        (with-current-buffer buf
+          (let ((result
+                 (agent-shell-to-go--permission-responder
+                  (list :tool-call (list :title "Bash")
+                        :options options
+                        :respond respond-fn))))
+            (should (eq t result))
+            (let ((texts (agent-shell-to-go-test--sent-texts tr)))
+              (should (= 1 (length texts)))
+              (should (string-match-p "Permission Required" (car texts))))
+            (should (= 1 (length agent-shell-to-go--pending-permissions)))
+            (let ((info (cdar agent-shell-to-go--pending-permissions)))
+              (should (eq respond-fn (map-elt info :respond)))
+              (should (equal options (map-elt info :options))))))
       (setq agent-shell-to-go--pending-permissions nil)
       (agent-shell-to-go-test--cleanup-buffer buf))))
 
@@ -369,7 +366,7 @@
 ; Inbound reaction hook 
 
 (ert-deftest agent-shell-to-go-test-bridge-reaction-permission-allow ()
-  "permission-allow reaction calls send-permission-response with the allow option-id."
+  "permission-allow reaction calls the :respond closure with the allow option-id."
   (let* ((tr (agent-shell-to-go-test-make))
          (buf (agent-shell-to-go-test--make-bridge-buffer tr))
          (msg-id (agent-shell-to-go-transport-send-text
@@ -377,14 +374,11 @@
          (responded-with nil)
          (agent-shell-to-go--pending-permissions
           (list (cons (list 'test "test-channel" msg-id)
-                      (list :request-id "req1"
-                            :buffer buf
-                            :options [((kind . "allow") (optionId . "opt-allow"))
-                                      ((kind . "deny") (optionId . "opt-deny"))])))))
+                      (list :respond (lambda (id) (setq responded-with id))
+                            :options (list (list :kind "allow" :option-id "opt-allow")
+                                           (list :kind "deny" :option-id "opt-deny")))))))
     (unwind-protect
-        (cl-letf (((symbol-function 'agent-shell--send-permission-response)
-                   (lambda (&rest args)
-                     (setq responded-with (map-elt args :option-id)))))
+        (progn
           (agent-shell-to-go-test-fire-reaction
            tr "test-channel" msg-id "u1" 'permission-allow t)
           (should (equal "opt-allow" responded-with)))
@@ -392,7 +386,7 @@
       (agent-shell-to-go-test--cleanup-buffer buf))))
 
 (ert-deftest agent-shell-to-go-test-bridge-reaction-permission-reject ()
-  "permission-reject reaction calls send-permission-response with the deny option-id."
+  "permission-reject reaction calls the :respond closure with the deny option-id."
   (let* ((tr (agent-shell-to-go-test-make))
          (buf (agent-shell-to-go-test--make-bridge-buffer tr))
          (msg-id (agent-shell-to-go-transport-send-text
@@ -400,14 +394,11 @@
          (responded-with nil)
          (agent-shell-to-go--pending-permissions
           (list (cons (list 'test "test-channel" msg-id)
-                      (list :request-id "req2"
-                            :buffer buf
-                            :options [((kind . "allow") (optionId . "opt-allow"))
-                                      ((kind . "deny") (optionId . "opt-deny"))])))))
+                      (list :respond (lambda (id) (setq responded-with id))
+                            :options (list (list :kind "allow" :option-id "opt-allow")
+                                           (list :kind "deny" :option-id "opt-deny")))))))
     (unwind-protect
-        (cl-letf (((symbol-function 'agent-shell--send-permission-response)
-                   (lambda (&rest args)
-                     (setq responded-with (map-elt args :option-id)))))
+        (progn
           (agent-shell-to-go-test-fire-reaction
            tr "test-channel" msg-id "u1" 'permission-reject t)
           (should (equal "opt-deny" responded-with)))
@@ -421,8 +412,7 @@
          (agent-shell-to-go--pending-permissions nil)
          (called nil))
     (unwind-protect
-        (cl-letf (((symbol-function 'agent-shell--send-permission-response)
-                   (lambda (&rest _) (setq called t))))
+        (progn
           (agent-shell-to-go-test-fire-reaction
            tr "test-channel" "no-such-msg" "u1" 'permission-allow t)
           (should (null called)))
@@ -431,41 +421,36 @@
 ; --find-option-id
 
 (ert-deftest agent-shell-to-go-test-bridge-find-option-id-allow ()
-  "Returns optionId for allow kind variants."
-  (let ((options '(((kind . "deny") (optionId . "d1"))
-                   ((kind . "allow") (optionId . "a1")))))
+  "Returns :option-id for allow kind variants."
+  (let ((options (list (list :kind "deny" :option-id "d1")
+                       (list :kind "allow" :option-id "a1"))))
     (should (equal "a1" (agent-shell-to-go--find-option-id options 'permission-allow))))
-  (let ((options '(((kind . "accept") (optionId . "a2")))))
+  (let ((options (list (list :kind "accept" :option-id "a2"))))
     (should (equal "a2" (agent-shell-to-go--find-option-id options 'permission-allow))))
-  (let ((options '(((kind . "allow_once") (optionId . "a3")))))
+  (let ((options (list (list :kind "allow_once" :option-id "a3"))))
     (should (equal "a3" (agent-shell-to-go--find-option-id options 'permission-allow)))))
 
 (ert-deftest agent-shell-to-go-test-bridge-find-option-id-always ()
-  "Returns optionId for always kind variants."
-  (let ((options '(((kind . "always") (optionId . "al1")))))
+  "Returns :option-id for always kind variants."
+  (let ((options (list (list :kind "always" :option-id "al1"))))
     (should (equal "al1" (agent-shell-to-go--find-option-id options 'permission-always))))
-  (let ((options '(((kind . "alwaysAllow") (optionId . "al2")))))
+  (let ((options (list (list :kind "alwaysAllow" :option-id "al2"))))
     (should (equal "al2" (agent-shell-to-go--find-option-id options 'permission-always))))
-  (let ((options '(((kind . "allow_always") (optionId . "al3")))))
+  (let ((options (list (list :kind "allow_always" :option-id "al3"))))
     (should (equal "al3" (agent-shell-to-go--find-option-id options 'permission-always)))))
 
 (ert-deftest agent-shell-to-go-test-bridge-find-option-id-reject ()
-  "Returns optionId for reject kind variants."
-  (let ((options '(((kind . "deny") (optionId . "r1")))))
+  "Returns :option-id for reject kind variants."
+  (let ((options (list (list :kind "deny" :option-id "r1"))))
     (should (equal "r1" (agent-shell-to-go--find-option-id options 'permission-reject))))
-  (let ((options '(((kind . "reject") (optionId . "r2")))))
+  (let ((options (list (list :kind "reject" :option-id "r2"))))
     (should (equal "r2" (agent-shell-to-go--find-option-id options 'permission-reject))))
-  (let ((options '(((kind . "reject_once") (optionId . "r3")))))
+  (let ((options (list (list :kind "reject_once" :option-id "r3"))))
     (should (equal "r3" (agent-shell-to-go--find-option-id options 'permission-reject)))))
-
-(ert-deftest agent-shell-to-go-test-bridge-find-option-id-fallback-id ()
-  "Falls back to `id' key when `optionId' is absent."
-  (let ((options '(((kind . "allow") (id . "fallback-id")))))
-    (should (equal "fallback-id" (agent-shell-to-go--find-option-id options 'permission-allow)))))
 
 (ert-deftest agent-shell-to-go-test-bridge-find-option-id-no-match ()
   "Returns nil when no option matches the action."
-  (let ((options '(((kind . "deny") (optionId . "r1")))))
+  (let ((options (list (list :kind "deny" :option-id "r1"))))
     (should (null (agent-shell-to-go--find-option-id options 'permission-allow))))
   (should (null (agent-shell-to-go--find-option-id nil 'permission-allow))))
 

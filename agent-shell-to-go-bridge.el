@@ -51,6 +51,9 @@
   "Non-nil when this buffer is being killed as part of a session restart.
 Suppresses the '_Session ended_' message in bridge-disable.")
 
+(defvar-local agent-shell-to-go--prev-permission-responder nil
+  "Saved value of `agent-shell-permission-responder-function' before bridge-enable.")
+
 ; Global state 
 
 (defvar agent-shell-to-go--active-buffers nil
@@ -59,7 +62,7 @@ Suppresses the '_Session ended_' message in bridge-disable.")
 (defvar agent-shell-to-go--pending-permissions nil
   "Alist of pending permission requests.
 Key: (transport-name channel-id message-id)
-Value: plist with :request-id :buffer :options :command")
+Value: plist with :respond :options")
 
 (defvar agent-shell-to-go--inherit-state nil
   "Plist of transport state for bridge-enable to inherit on a restarted session.
@@ -174,17 +177,18 @@ OPTIONS is forwarded to `agent-shell-to-go-transport-send-text'."
 ; Permission helpers 
 
 (defun agent-shell-to-go--find-option-id (options action)
-  "Find option id in OPTIONS matching canonical ACTION symbol."
+  "Find option id in OPTIONS matching canonical ACTION symbol.
+OPTIONS is the enriched list from `agent-shell-permission-responder-function',
+where each entry is a plist with :kind and :option-id."
   (let ((kinds
          (pcase action
            ('permission-allow '("allow" "accept" "allow_once"))
            ('permission-always '("always" "alwaysAllow" "allow_always"))
            ('permission-reject '("deny" "reject" "reject_once")))))
-    (when-let* ((opt
-                 (seq-find
-                  (lambda (opt) (member (map-elt opt 'kind) kinds))
-                  (append options nil))))
-      (or (map-elt opt 'optionId) (map-elt opt 'id)))))
+    (when-let* ((opt (seq-find
+                      (lambda (opt) (member (map-elt opt :kind) kinds))
+                      options)))
+      (map-elt opt :option-id))))
 
 ; Set agent mode helper 
 
@@ -356,18 +360,11 @@ Presentation reactions are handled by the main dispatcher registered first."
            (pending (assoc key agent-shell-to-go--pending-permissions #'equal)))
       (when pending
         (let* ((info (cdr pending))
-               (request-id (map-elt info :request-id))
-               (buffer (map-elt info :buffer))
+               (respond (map-elt info :respond))
                (options (map-elt info :options))
                (option-id (agent-shell-to-go--find-option-id options action)))
-          (when (and buffer (buffer-live-p buffer) option-id)
-            (with-current-buffer buffer
-              (let ((state agent-shell--state))
-                (agent-shell--send-permission-response
-                 :client (map-elt state :client)
-                 :request-id request-id
-                 :option-id option-id
-                 :state state)))
+          (when option-id
+            (funcall respond option-id)
             (setq agent-shell-to-go--pending-permissions
                   (cl-remove key agent-shell-to-go--pending-permissions
                              :key #'car
@@ -486,50 +483,42 @@ Presentation reactions are handled by the main dispatcher registered first."
 
 ; Advice functions 
 
-(defun agent-shell-to-go--on-request (orig-fn &rest args)
-  "Advice around `agent-shell--on-request'.  Notify on permission requests."
-  (let* ((state (map-elt args :state))
-         (request (map-elt args :acp-request))
-         (method (map-elt request 'method))
-         (buffer (and state (map-elt state :buffer))))
-    (when (and buffer
-               (buffer-live-p buffer)
-               (equal method "session/request_permission")
-               (buffer-local-value 'agent-shell-to-go-mode buffer))
-      (let* ((thread-id (buffer-local-value 'agent-shell-to-go--thread-id buffer))
-             (transport (buffer-local-value 'agent-shell-to-go--transport buffer))
-             (channel-id (buffer-local-value 'agent-shell-to-go--channel-id buffer))
-             (request-id (map-elt request 'id))
-             (params (map-elt request 'params))
-             (options (map-elt params 'options))
-             (tool-call (map-elt params 'toolCall))
-             (title (map-elt tool-call 'title))
-             (raw-input (map-elt tool-call 'rawInput))
-             (command (and raw-input (map-elt raw-input 'command))))
-        (when (and thread-id transport channel-id)
-          (condition-case err
-              (let
-                  ((msg-id
-                    (agent-shell-to-go-transport-send-text
-                     transport channel-id thread-id
-                     (format
-                      "*Permission Required*\n`%s`\n\nReact to approve, deny, or always allow."
-                      (or command title "Unknown action")))))
-                (when msg-id
-                  (push (cons
-                         (list
-                          (agent-shell-to-go-transport-name transport)
-                          channel-id
-                          msg-id)
-                         (list
-                          :request-id request-id
-                          :buffer buffer
-                          :options options
-                          :command (or command title "Unknown")))
-                        agent-shell-to-go--pending-permissions)))
-            (error
-             (message "agent-shell-to-go permission notify error: %s" err)))))))
-  (apply orig-fn args))
+(defun agent-shell-to-go--permission-responder (permission)
+  "Handle a PERMISSION request by notifying the remote transport.
+Set as `agent-shell-permission-responder-function' when mirroring is on.
+Falls back to `agent-shell-to-go--prev-permission-responder' when transport
+is not ready.  Returns t to suppress the Emacs permission UI."
+  (if (and agent-shell-to-go-mode
+           agent-shell-to-go--transport
+           agent-shell-to-go--thread-id)
+      (let* ((tool-call (map-elt permission :tool-call))
+             (options (map-elt permission :options))
+             (respond (map-elt permission :respond))
+             (title (or (map-elt tool-call :title) "Unknown action"))
+             (msg-id
+              (condition-case err
+                  (agent-shell-to-go-transport-send-text
+                   agent-shell-to-go--transport
+                   agent-shell-to-go--channel-id
+                   agent-shell-to-go--thread-id
+                   (format "*Permission Required*\n`%s`\n\nReact to approve, deny, or always allow."
+                           title))
+                (error
+                 (message "agent-shell-to-go permission notify error: %s" err)
+                 nil))))
+        (if msg-id
+            (progn
+              (push (cons
+                     (list (agent-shell-to-go-transport-name agent-shell-to-go--transport)
+                           agent-shell-to-go--channel-id
+                           msg-id)
+                     (list :respond respond :options options))
+                    agent-shell-to-go--pending-permissions)
+              t)
+          (when (functionp agent-shell-to-go--prev-permission-responder)
+            (funcall agent-shell-to-go--prev-permission-responder permission))))
+    (when (functionp agent-shell-to-go--prev-permission-responder)
+      (funcall agent-shell-to-go--prev-permission-responder permission))))
 
 (defun agent-shell-to-go--on-send-command (orig-fn &rest args)
   "Advice around `agent-shell--send-command'.  Mirror user prompts."
@@ -742,12 +731,16 @@ Called via `agent-shell-subscribe-to' with the shell buffer current."
                transport agent-shell-to-go--channel-id (buffer-name))))
     ;; Track buffer
     (add-to-list 'agent-shell-to-go--active-buffers (current-buffer))
+    ;; Save and install permission responder
+    (setq agent-shell-to-go--prev-permission-responder
+          agent-shell-permission-responder-function)
+    (setq-local agent-shell-permission-responder-function
+                #'agent-shell-to-go--permission-responder)
     ;; Add advice
     (advice-add 'agent-shell--send-command :around #'agent-shell-to-go--on-send-command)
     (advice-add
      'agent-shell--on-notification
      :around #'agent-shell-to-go--on-notification)
-    (advice-add 'agent-shell--on-request :around #'agent-shell-to-go--on-request)
     (advice-add
      'agent-shell--initialize-client
      :after #'agent-shell-to-go--on-client-initialized)
@@ -819,12 +812,14 @@ Called via `agent-shell-subscribe-to' with the shell buffer current."
        agent-shell--transcript-file
        "Session transcript"))
     (agent-shell-to-go--send "_Session ended_"))
+  ;; Restore permission responder
+  (setq-local agent-shell-permission-responder-function
+              agent-shell-to-go--prev-permission-responder)
   (setq agent-shell-to-go--active-buffers
         (delete (current-buffer) agent-shell-to-go--active-buffers))
   (unless agent-shell-to-go--active-buffers
     (advice-remove 'agent-shell--send-command #'agent-shell-to-go--on-send-command)
     (advice-remove 'agent-shell--on-notification #'agent-shell-to-go--on-notification)
-    (advice-remove 'agent-shell--on-request #'agent-shell-to-go--on-request)
     (advice-remove
      'agent-shell--initialize-client #'agent-shell-to-go--on-client-initialized))
   (agent-shell-to-go--debug "bridge disabled"))
@@ -851,13 +846,14 @@ Called via `agent-shell-subscribe-to' with the shell buffer current."
                transport agent-shell-to-go--channel-id (buffer-name)))
         (unless (memq buf agent-shell-to-go--active-buffers)
           (add-to-list 'agent-shell-to-go--active-buffers buf))
+        (setq-local agent-shell-permission-responder-function
+                    #'agent-shell-to-go--permission-responder)
         (advice-add
          'agent-shell--send-command
          :around #'agent-shell-to-go--on-send-command)
         (advice-add
          'agent-shell--on-notification
          :around #'agent-shell-to-go--on-notification)
-        (advice-add 'agent-shell--on-request :around #'agent-shell-to-go--on-request)
         ;; Refresh subscriptions for the new thread
         (dolist (sub
                  (list

@@ -35,11 +35,7 @@
 (ert-deftest agent-shell-to-go-test-core-slash-arg-parsing ()
   "Slash command args parse correctly for each command."
   (let ((args (agent-shell-to-go--parse-slash-args "/new-agent" "~/code/myproject")))
-    (should (equal "~/code/myproject" (map-elt args :folder)))
-    (should (null (map-elt args :container-p))))
-  (let ((args (agent-shell-to-go--parse-slash-args "/new-agent-container" "~/code/foo")))
-    (should (equal "~/code/foo" (map-elt args :folder)))
-    (should (map-elt args :container-p)))
+    (should (equal "~/code/myproject" (map-elt args :folder))))
   (let ((args (agent-shell-to-go--parse-slash-args "/new-project" "myapp")))
     (should (equal "myapp" (map-elt args :project-name)))))
 
