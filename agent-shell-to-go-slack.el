@@ -463,7 +463,7 @@ METHOD is GET or POST, ENDPOINT is without the base URL, DATA is the payload."
 (cl-defmethod agent-shell-to-go-transport-disconnect
     ((transport agent-shell-to-go-slack-transport))
   "Disconnect the Slack WebSocket."
-  (when-let ((ws (agent-shell-to-go-slack-transport-ws transport)))
+  (when-let* ((ws (agent-shell-to-go-slack-transport-ws transport)))
     (agent-shell-to-go--ws-disconnect ws)))
 
 (cl-defmethod agent-shell-to-go-transport-connected-p

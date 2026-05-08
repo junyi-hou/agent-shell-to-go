@@ -138,7 +138,7 @@ Lowercase, replace invalid characters with hyphens, max 80 chars."
   "Get the project path for the current buffer."
   (or (and (fboundp 'projectile-project-root) (projectile-project-root))
       (and (fboundp 'project-current)
-           (when-let ((proj (project-current)))
+           (when-let* ((proj (project-current)))
              (if (fboundp 'project-root)
                  (project-root proj)
                (car (project-roots proj)))))

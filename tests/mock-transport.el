@@ -14,7 +14,7 @@
 ;;   (require 'agent-shell-to-go-test-transport)
 ;;   (agent-shell-to-go-register-transport 'test (agent-shell-to-go-test-make))
 ;;   ;; Then trigger hooks manually:
-;;   (agent-shell-to-go-test-fire-message my-transport "C1" "T1" "U1" "hello!")
+;;   (agent-shell-to-go-test-inbound-message my-transport "C1" "T1" "U1" "hello!")
 
 ;;; Code:
 
@@ -159,7 +159,7 @@
 
 ; Scripted inbound event helpers 
 
-(defun agent-shell-to-go-test-fire-message (transport channel thread-id user text)
+(defun agent-shell-to-go-test-inbound-message (transport channel thread-id user text)
   "Fire a message inbound event on TRANSPORT."
   (apply #'run-hook-with-args
          'agent-shell-to-go-message-hook
@@ -170,7 +170,7 @@
                :text text
                :msg-id (agent-shell-to-go-test--next-id transport))))
 
-(defun agent-shell-to-go-test-fire-reaction
+(defun agent-shell-to-go-test-inbound-reaction
     (transport channel msg-id user action &optional added-p)
   "Fire a reaction inbound event on TRANSPORT."
   (apply #'run-hook-with-args
@@ -184,7 +184,7 @@
                :raw-emoji (symbol-name action)
                :added-p (if (null added-p) t added-p))))
 
-(defun agent-shell-to-go-test-calls (transport &optional method)
+(defun agent-shell-to-go-test-outbound-calls (transport &optional method)
   "Return recorded calls on TRANSPORT, optionally filtered by METHOD."
   (let ((calls (nreverse (copy-sequence
                           (agent-shell-to-go-test-transport-calls transport)))))

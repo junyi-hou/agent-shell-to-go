@@ -25,10 +25,10 @@
   "Presentation reaction handler edits the message and restores it on removal."
   (let* ((tr (agent-shell-to-go-test-make))
          (id (agent-shell-to-go-transport-send-text tr "C1" nil "original text")))
-    (agent-shell-to-go-test-fire-reaction tr "C1" id "testuser" 'hide t)
+    (agent-shell-to-go-test-inbound-reaction tr "C1" id "testuser" 'hide t)
     (should (string-match-p "hidden"
                             (or (agent-shell-to-go-transport-get-message-text tr "C1" id) "")))
-    (agent-shell-to-go-test-fire-reaction tr "C1" id "testuser" 'hide nil)
+    (agent-shell-to-go-test-inbound-reaction tr "C1" id "testuser" 'hide nil)
     (should (equal "original text"
                    (agent-shell-to-go-transport-get-message-text tr "C1" id)))))
 
@@ -103,7 +103,7 @@
     (unwind-protect
         (progn
           (agent-shell-to-go--save-truncated-message tr "C1" id full "collapsed")
-          (agent-shell-to-go-test-fire-reaction tr "C1" id "testuser" 'expand-truncated t)
+          (agent-shell-to-go-test-inbound-reaction tr "C1" id "testuser" 'expand-truncated t)
           (let ((text (agent-shell-to-go-transport-get-message-text tr "C1" id)))
             (should (string-prefix-p (make-string 500 ?z) text))
             (should (string-match-p "expand further" text))))
@@ -119,7 +119,7 @@
     (unwind-protect
         (progn
           (agent-shell-to-go--save-truncated-message tr "C1" id full "collapsed")
-          (agent-shell-to-go-test-fire-reaction tr "C1" id "testuser" 'expand-full t)
+          (agent-shell-to-go-test-inbound-reaction tr "C1" id "testuser" 'expand-full t)
           (should (equal full (agent-shell-to-go-transport-get-message-text tr "C1" id))))
       (delete-directory agent-shell-to-go-storage-base-dir t))))
 
@@ -133,7 +133,7 @@
     (unwind-protect
         (progn
           (agent-shell-to-go--save-truncated-message tr "C1" id full "collapsed-header")
-          (agent-shell-to-go-test-fire-reaction tr "C1" id "testuser" 'expand-full nil)
+          (agent-shell-to-go-test-inbound-reaction tr "C1" id "testuser" 'expand-full nil)
           (should (equal "collapsed-header"
                          (agent-shell-to-go-transport-get-message-text tr "C1" id))))
       (delete-directory agent-shell-to-go-storage-base-dir t))))

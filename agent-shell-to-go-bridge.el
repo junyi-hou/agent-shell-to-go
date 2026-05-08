@@ -443,7 +443,7 @@ Presentation reactions are handled by the main dispatcher registered first."
      (t
       (mapcar
        (lambda (buf)
-         (when-let ((f (buffer-file-name buf)))
+         (when-let* ((f (buffer-file-name buf)))
            (file-name-directory f)))
        (buffer-list)))))))
 
@@ -732,6 +732,9 @@ Called via `agent-shell-subscribe-to' with the shell buffer current."
 
 (defun agent-shell-to-go--bridge-enable ()
   "Enable transport mirroring for this buffer."
+  ;; `agent-shell-to-go--inherit-state' is set by !restart to carry the old
+  ;; session's transport/channel/thread over to the new buffer.  Consumed
+  ;; here (set to nil) so it's a one-shot handoff and can't leak elsewhere.
   (let* ((inherited agent-shell-to-go--inherit-state)
          (_ (setq agent-shell-to-go--inherit-state nil))
          (transport
@@ -753,6 +756,7 @@ Called via `agent-shell-subscribe-to' with the shell buffer current."
                transport agent-shell-to-go--channel-id (buffer-name))))
     ;; Track buffer
     (add-to-list 'agent-shell-to-go--active-buffers (current-buffer))
+
     ;; Save and install permission responder
     (setq agent-shell-to-go--prev-permission-responder
           agent-shell-permission-responder-function)

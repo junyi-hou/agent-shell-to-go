@@ -372,7 +372,7 @@ Returns the parsed JSON response or nil."
     ((transport agent-shell-to-go-discord-transport))
   "Disconnect the Discord WebSocket."
   (agent-shell-to-go--discord-stop-heartbeat transport)
-  (when-let ((ws (agent-shell-to-go-discord-transport-ws transport)))
+  (when-let* ((ws (agent-shell-to-go-discord-transport-ws transport)))
     (agent-shell-to-go--ws-disconnect ws)))
 
 (cl-defmethod agent-shell-to-go-transport-connected-p
@@ -636,7 +636,7 @@ CHANNEL must be a forum channel (type 15); LABEL becomes the post title."
 
 (defun agent-shell-to-go--discord-stop-heartbeat (transport)
   "Cancel the heartbeat timer for TRANSPORT."
-  (when-let ((timer (agent-shell-to-go-discord-transport-heartbeat-timer transport)))
+  (when-let* ((timer (agent-shell-to-go-discord-transport-heartbeat-timer transport)))
     (cancel-timer timer)
     (setf (agent-shell-to-go-discord-transport-heartbeat-timer transport) nil)))
 
