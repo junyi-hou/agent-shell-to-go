@@ -102,11 +102,10 @@ Common issues:
 ## Running Tests
 
 ```shell
-emacs -batch \
-  -L ~/.emacs.d/elpaca/builds/shell-maker \
-  -L ~/.emacs.d/elpaca/builds/acp \
-  -L ~/.emacs.d/elpaca/builds/agent-shell \
-  -L .
-  -L tests/
-  -f ert-run-tests-batch-and-exit
+make test
+```
+
+Optionally, test only one file:
+```shell
+make test TEST=<TEST-FILE>
 ```
