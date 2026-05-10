@@ -193,11 +193,8 @@ normal session-ID wait would time out."
      ,@body))
 
 (defun agent-shell-to-go-test-bridge--send-prompt (buf text)
-  "Send TEXT as a prompt in the agent-shell buffer BUF.
-
-Calls `agent-shell--handle' directly, which goes through the full
-initialization check and the bridge advice on `agent-shell--send-command'."
-  (agent-shell--handle :command text :shell-buffer buf))
+  "Send TEXT as a prompt in the agent-shell buffer BUF."
+  (agent-shell-insert :text text :submit t :no-focus t :shell-buffer buf))
 
 ;;; Tests
 
@@ -391,15 +388,17 @@ Exercises `agent-shell-to-go--handle-command' via the message hook."
     (let ((thread-id (buffer-local-value 'agent-shell-to-go--thread-id buf))
           (channel-id (buffer-local-value 'agent-shell-to-go--channel-id buf)))
       (agent-shell-to-go-test-bridge--with-mode-stub
-        (agent-shell-to-go-test-inbound-message
-         tr channel-id thread-id "testuser" "!yolo"))
+       (agent-shell-to-go-test-inbound-message
+        tr channel-id thread-id "testuser" "!yolo"))
       (should
-       (cl-some (lambda (text) (string-match-p "Bypass Permissions" text))
-                (agent-shell-to-go-test-bridge--sent-texts tr)))
+       (cl-some
+        (lambda (text) (string-match-p "Bypass Permissions" text))
+        (agent-shell-to-go-test-bridge--sent-texts tr)))
       (should
-       (equal "bypassPermissions"
-              (with-current-buffer buf
-                (map-nested-elt agent-shell--state '(:session :mode-id))))))))
+       (equal
+        "bypassPermissions"
+        (with-current-buffer buf
+          (map-nested-elt agent-shell--state '(:session :mode-id))))))))
 
 (ert-deftest agent-shell-to-go-test-bridge-bypass-command ()
   "!bypass is an alias for !yolo — sets bypassPermissions mode."
@@ -407,15 +406,17 @@ Exercises `agent-shell-to-go--handle-command' via the message hook."
     (let ((thread-id (buffer-local-value 'agent-shell-to-go--thread-id buf))
           (channel-id (buffer-local-value 'agent-shell-to-go--channel-id buf)))
       (agent-shell-to-go-test-bridge--with-mode-stub
-        (agent-shell-to-go-test-inbound-message
-         tr channel-id thread-id "testuser" "!bypass"))
+       (agent-shell-to-go-test-inbound-message
+        tr channel-id thread-id "testuser" "!bypass"))
       (should
-       (cl-some (lambda (text) (string-match-p "Bypass Permissions" text))
-                (agent-shell-to-go-test-bridge--sent-texts tr)))
+       (cl-some
+        (lambda (text) (string-match-p "Bypass Permissions" text))
+        (agent-shell-to-go-test-bridge--sent-texts tr)))
       (should
-       (equal "bypassPermissions"
-              (with-current-buffer buf
-                (map-nested-elt agent-shell--state '(:session :mode-id))))))))
+       (equal
+        "bypassPermissions"
+        (with-current-buffer buf
+          (map-nested-elt agent-shell--state '(:session :mode-id))))))))
 
 (ert-deftest agent-shell-to-go-test-bridge-safe-command ()
   "!safe sets acceptEdits mode and notifies the transport."
@@ -423,15 +424,17 @@ Exercises `agent-shell-to-go--handle-command' via the message hook."
     (let ((thread-id (buffer-local-value 'agent-shell-to-go--thread-id buf))
           (channel-id (buffer-local-value 'agent-shell-to-go--channel-id buf)))
       (agent-shell-to-go-test-bridge--with-mode-stub
-        (agent-shell-to-go-test-inbound-message
-         tr channel-id thread-id "testuser" "!safe"))
+       (agent-shell-to-go-test-inbound-message
+        tr channel-id thread-id "testuser" "!safe"))
       (should
-       (cl-some (lambda (text) (string-match-p "Accept Edits" text))
-                (agent-shell-to-go-test-bridge--sent-texts tr)))
+       (cl-some
+        (lambda (text) (string-match-p "Accept Edits" text))
+        (agent-shell-to-go-test-bridge--sent-texts tr)))
       (should
-       (equal "acceptEdits"
-              (with-current-buffer buf
-                (map-nested-elt agent-shell--state '(:session :mode-id))))))))
+       (equal
+        "acceptEdits"
+        (with-current-buffer buf
+          (map-nested-elt agent-shell--state '(:session :mode-id))))))))
 
 (ert-deftest agent-shell-to-go-test-bridge-accept-command ()
   "!accept is an alias for !safe — sets acceptEdits mode."
@@ -439,15 +442,17 @@ Exercises `agent-shell-to-go--handle-command' via the message hook."
     (let ((thread-id (buffer-local-value 'agent-shell-to-go--thread-id buf))
           (channel-id (buffer-local-value 'agent-shell-to-go--channel-id buf)))
       (agent-shell-to-go-test-bridge--with-mode-stub
-        (agent-shell-to-go-test-inbound-message
-         tr channel-id thread-id "testuser" "!accept"))
+       (agent-shell-to-go-test-inbound-message
+        tr channel-id thread-id "testuser" "!accept"))
       (should
-       (cl-some (lambda (text) (string-match-p "Accept Edits" text))
-                (agent-shell-to-go-test-bridge--sent-texts tr)))
+       (cl-some
+        (lambda (text) (string-match-p "Accept Edits" text))
+        (agent-shell-to-go-test-bridge--sent-texts tr)))
       (should
-       (equal "acceptEdits"
-              (with-current-buffer buf
-                (map-nested-elt agent-shell--state '(:session :mode-id))))))))
+       (equal
+        "acceptEdits"
+        (with-current-buffer buf
+          (map-nested-elt agent-shell--state '(:session :mode-id))))))))
 
 (ert-deftest agent-shell-to-go-test-bridge-acceptedits-command ()
   "!acceptedits is an alias for !safe — sets acceptEdits mode."
@@ -455,15 +460,17 @@ Exercises `agent-shell-to-go--handle-command' via the message hook."
     (let ((thread-id (buffer-local-value 'agent-shell-to-go--thread-id buf))
           (channel-id (buffer-local-value 'agent-shell-to-go--channel-id buf)))
       (agent-shell-to-go-test-bridge--with-mode-stub
-        (agent-shell-to-go-test-inbound-message
-         tr channel-id thread-id "testuser" "!acceptedits"))
+       (agent-shell-to-go-test-inbound-message
+        tr channel-id thread-id "testuser" "!acceptedits"))
       (should
-       (cl-some (lambda (text) (string-match-p "Accept Edits" text))
-                (agent-shell-to-go-test-bridge--sent-texts tr)))
+       (cl-some
+        (lambda (text) (string-match-p "Accept Edits" text))
+        (agent-shell-to-go-test-bridge--sent-texts tr)))
       (should
-       (equal "acceptEdits"
-              (with-current-buffer buf
-                (map-nested-elt agent-shell--state '(:session :mode-id))))))))
+       (equal
+        "acceptEdits"
+        (with-current-buffer buf
+          (map-nested-elt agent-shell--state '(:session :mode-id))))))))
 
 (ert-deftest agent-shell-to-go-test-bridge-plan-command ()
   "!plan sets plan mode and notifies the transport."
@@ -471,15 +478,17 @@ Exercises `agent-shell-to-go--handle-command' via the message hook."
     (let ((thread-id (buffer-local-value 'agent-shell-to-go--thread-id buf))
           (channel-id (buffer-local-value 'agent-shell-to-go--channel-id buf)))
       (agent-shell-to-go-test-bridge--with-mode-stub
-        (agent-shell-to-go-test-inbound-message
-         tr channel-id thread-id "testuser" "!plan"))
+       (agent-shell-to-go-test-inbound-message
+        tr channel-id thread-id "testuser" "!plan"))
       (should
-       (cl-some (lambda (text) (string-match-p "Plan" text))
-                (agent-shell-to-go-test-bridge--sent-texts tr)))
+       (cl-some
+        (lambda (text) (string-match-p "Plan" text))
+        (agent-shell-to-go-test-bridge--sent-texts tr)))
       (should
-       (equal "plan"
-              (with-current-buffer buf
-                (map-nested-elt agent-shell--state '(:session :mode-id))))))))
+       (equal
+        "plan"
+        (with-current-buffer buf
+          (map-nested-elt agent-shell--state '(:session :mode-id))))))))
 
 (ert-deftest agent-shell-to-go-test-bridge-planmode-command ()
   "!planmode is an alias for !plan — sets plan mode."
@@ -487,15 +496,17 @@ Exercises `agent-shell-to-go--handle-command' via the message hook."
     (let ((thread-id (buffer-local-value 'agent-shell-to-go--thread-id buf))
           (channel-id (buffer-local-value 'agent-shell-to-go--channel-id buf)))
       (agent-shell-to-go-test-bridge--with-mode-stub
-        (agent-shell-to-go-test-inbound-message
-         tr channel-id thread-id "testuser" "!planmode"))
+       (agent-shell-to-go-test-inbound-message
+        tr channel-id thread-id "testuser" "!planmode"))
       (should
-       (cl-some (lambda (text) (string-match-p "Plan" text))
-                (agent-shell-to-go-test-bridge--sent-texts tr)))
+       (cl-some
+        (lambda (text) (string-match-p "Plan" text))
+        (agent-shell-to-go-test-bridge--sent-texts tr)))
       (should
-       (equal "plan"
-              (with-current-buffer buf
-                (map-nested-elt agent-shell--state '(:session :mode-id))))))))
+       (equal
+        "plan"
+        (with-current-buffer buf
+          (map-nested-elt agent-shell--state '(:session :mode-id))))))))
 
 (ert-deftest agent-shell-to-go-test-bridge-mode-command ()
   "!mode returns the current session mode-id."
@@ -509,8 +520,9 @@ Exercises `agent-shell-to-go--handle-command' via the message hook."
       (agent-shell-to-go-test-inbound-message
        tr channel-id thread-id "testuser" "!mode")
       (should
-       (cl-some (lambda (text) (string-match-p "bypassPermissions" text))
-                (agent-shell-to-go-test-bridge--sent-texts tr))))))
+       (cl-some
+        (lambda (text) (string-match-p "bypassPermissions" text))
+        (agent-shell-to-go-test-bridge--sent-texts tr))))))
 
 (ert-deftest agent-shell-to-go-test-bridge-stop-command ()
   "!stop interrupts a long_running scenario and notifies the transport.
@@ -522,20 +534,23 @@ verifies the session becomes idle well before that deadline."
       (agent-shell-to-go-test-bridge--send-prompt buf "test long_running")
       ;; Wait until mock-acp has started producing output
       (should
-       (agent-shell-to-go-test-bridge--wait-until
-        (lambda () (with-current-buffer buf (shell-maker-busy)))
-        5))
+       (agent-shell-to-go-test-bridge--wait-until (lambda ()
+                                                    (with-current-buffer buf
+                                                      (shell-maker-busy)))
+                                                  5))
       ;; !stop fires agent-shell-interrupt synchronously then sends the notice
       (agent-shell-to-go-test-inbound-message
        tr channel-id thread-id "testuser" "!stop")
       (should
-       (cl-some (lambda (text) (string-match-p "Agent interrupted" text))
-                (agent-shell-to-go-test-bridge--sent-texts tr)))
+       (cl-some
+        (lambda (text) (string-match-p "Agent interrupted" text))
+        (agent-shell-to-go-test-bridge--sent-texts tr)))
       ;; Session must become idle well before the uninterrupted 9 s window
       (should
-       (agent-shell-to-go-test-bridge--wait-until
-        (lambda () (with-current-buffer buf (not (shell-maker-busy))))
-        8)))))
+       (agent-shell-to-go-test-bridge--wait-until (lambda ()
+                                                    (with-current-buffer buf
+                                                      (not (shell-maker-busy))))
+                                                  8)))))
 
 (ert-deftest agent-shell-to-go-test-bridge-restart-command ()
   "!restart kills the old buffer and spawns a new one with mode re-enabled.
