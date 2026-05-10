@@ -667,14 +667,14 @@ Called via `agent-shell-subscribe-to' with the shell buffer current."
                (already-sent
                 (and tool-call-id
                      (map-elt agent-shell-to-go--tool-calls tool-call-id))))
-          (when (and specific (not already-sent))
+          (when (and (not already-sent) (or specific title))
             (when (and agent-shell-to-go--current-agent-message
                        (> (length agent-shell-to-go--current-agent-message) 0))
               (agent-shell-to-go--send
                (agent-shell-to-go-transport-format-agent-message
                 agent-shell-to-go--transport agent-shell-to-go--current-agent-message))
               (setq agent-shell-to-go--current-agent-message nil))
-            (map-put! agent-shell-to-go--tool-calls tool-call-id t)
+            (setf (alist-get tool-call-id agent-shell-to-go--tool-calls) t)
             (let* ((title-has-specific
                     (and title specific (string-match-p (regexp-quote specific) title)))
                    (display
@@ -707,12 +707,20 @@ Called via `agent-shell-subscribe-to' with the shell buffer current."
                             nil)))))
               (condition-case err
                   (if (and diff-text (> (length diff-text) 0))
-                      (agent-shell-to-go--send
-                       (format "%s\n%s"
-                               (agent-shell-to-go-transport-format-tool-call-start
-                                agent-shell-to-go--transport display)
-                               diff-text)
-                       '(:truncate t))
+                      (let* ((start-text
+                              (agent-shell-to-go-transport-format-tool-call-start
+                               agent-shell-to-go--transport display))
+                             (full (format "%s\n%s" start-text diff-text)))
+                        (if agent-shell-to-go-show-tool-output
+                            (agent-shell-to-go--send full '(:truncate t))
+                          (let ((msg-id (agent-shell-to-go--send start-text)))
+                            (when msg-id
+                              (agent-shell-to-go--save-truncated-message
+                               agent-shell-to-go--transport
+                               agent-shell-to-go--channel-id
+                               msg-id
+                               full
+                               start-text)))))
                     (agent-shell-to-go--send
                      (agent-shell-to-go-transport-format-tool-call-start
                       agent-shell-to-go--transport display)
