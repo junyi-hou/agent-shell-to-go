@@ -5,7 +5,7 @@
 ;;; Commentary:
 
 ;; Implements the agent-shell-to-go transport protocol for Discord.
-;; Loaded automatically when `discord' is in `agent-shell-to-go-active-transports'.
+;; Use by setting `agent-shell-to-go-default-transport' to `discord'.
 ;;
 ;; Layout: each project maps to a Discord Forum channel (type 15); each
 ;; agent-shell session maps to a forum post (thread) within that forum.
@@ -795,7 +795,7 @@ Otherwise treats CHANNEL-ID as a top-level channel with no thread."
                  'agent-shell-to-go-message-hook
                  (list
                   :transport transport
-                  :channel hook-channel
+                  :channel-id hook-channel
                   :thread-id hook-thread
                   :user user-id
                   :text content
@@ -825,7 +825,7 @@ ADDED-P is t for MESSAGE_REACTION_ADD, nil for MESSAGE_REACTION_REMOVE."
                  'agent-shell-to-go-reaction-hook
                  (list
                   :transport transport
-                  :channel hook-channel
+                  :channel-id hook-channel
                   :thread-id nil
                   :msg-id msg-id
                   :user user-id
@@ -876,7 +876,7 @@ ADDED-P is t for MESSAGE_REACTION_ADD, nil for MESSAGE_REACTION_REMOVE."
                   :command command-name
                   :args args
                   :args-text args-text
-                  :channel hook-channel
+                  :channel-id hook-channel
                   :user user-id
                   :interaction-token combined-token)))))))
 

@@ -164,7 +164,7 @@
   (apply #'run-hook-with-args
          'agent-shell-to-go-message-hook
          (list :transport transport
-               :channel channel
+               :channel-id channel
                :thread-id thread-id
                :user user
                :text text
@@ -176,7 +176,7 @@
   (apply #'run-hook-with-args
          'agent-shell-to-go-reaction-hook
          (list :transport transport
-               :channel channel
+               :channel-id channel
                :thread-id nil
                :msg-id msg-id
                :user user

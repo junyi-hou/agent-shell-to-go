@@ -880,7 +880,7 @@ Options plist supports :truncate :ephemeral :user-id :interaction-token."
              'agent-shell-to-go-message-hook
              (list
               :transport transport
-              :channel channel
+              :channel-id channel
               :thread-id thread-ts
               :user user
               :text text
@@ -904,7 +904,7 @@ ADDED-P is t for reaction_added, nil for reaction_removed."
            'agent-shell-to-go-reaction-hook
            (list
             :transport transport
-            :channel channel
+            :channel-id channel
             :thread-id nil
             :msg-id msg-id
             :user user
@@ -935,7 +935,7 @@ ADDED-P is t for reaction_added, nil for reaction_removed."
               :command command
               :args args
               :args-text (or text "")
-              :channel channel
+              :channel-id channel
               :user user
               :interaction-token nil)))))
 

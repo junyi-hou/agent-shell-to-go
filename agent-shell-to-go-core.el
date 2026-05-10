@@ -323,7 +323,7 @@ Transports map raw reactions to these when firing the reaction hook.")
   "Hook run when a remote message arrives.
 Each function is called with a single plist argument:
   :transport  transport struct
-  :channel    channel id
+  :channel-id channel id
   :thread-id  thread id
   :user       remote user id
   :text       message text
@@ -333,7 +333,7 @@ Each function is called with a single plist argument:
   "Hook run when a remote reaction is added or removed.
 Plist argument:
   :transport  transport struct
-  :channel    channel id
+  :channel-id channel id
   :thread-id  thread id (may be nil)
   :msg-id     target message id
   :user       remote user id
@@ -349,7 +349,7 @@ Plist argument:
   :command           command name string (with leading slash)
   :args              typed args plist (per-command schema)
   :args-text         raw argument text
-  :channel           channel id
+  :channel-id        channel id
   :user              remote user id
   :interaction-token opaque ack token (nil on Slack)")
 
@@ -436,7 +436,7 @@ Plist argument:
 ; Presentation-reaction dispatcher
 
 (cl-defun agent-shell-to-go--handle-presentation-reaction
-    (&key transport channel msg-id action added-p &allow-other-keys)
+    (&key transport channel-id msg-id action added-p &allow-other-keys)
   "Handle presentation reactions (hide/expand/collapse) from a transport.
 This runs before bridge handlers so the bridge never sees presentation reactions."
   (pcase (cons added-p action)

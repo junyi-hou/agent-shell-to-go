@@ -292,7 +292,7 @@
      tr `((id . "M2") (channel_id . "THREAD1")
           (author . ((id . "USER1") (bot . :json-false)))
           (content . "in thread")))
-    (should (equal "FORUM1" (map-elt received :channel)))
+    (should (equal "FORUM1" (map-elt received :channel-id)))
     (should (equal "THREAD1" (map-elt received :thread-id)))))
 
 ;; ---------------------------------------------------------------------------
