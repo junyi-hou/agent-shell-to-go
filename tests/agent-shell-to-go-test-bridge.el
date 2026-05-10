@@ -17,6 +17,43 @@
 ;;
 ;; Run:
 ;;   make test TEST=agent-shell-to-go-test-bridge.el
+;;
+;; APIs under test:
+;;
+;;   agent-shell-to-go--on-send-command
+;;     - user-message-echoed: user prompt echo to transport
+;;   agent-shell-to-go--on-turn-complete
+;;     - agent-message-forwarded: agent message forwarding on turn end
+;;     - remote-message-not-echoed: remote-injected messages produce no echo or Processing line
+;;   agent-shell-to-go--bridge-on-tool-call-update
+;;     - tool-call-forwarded: tool call forwarding (generic)
+;;     - tool-call-output-shown: show-tool-output t: full text output
+;;     - tool-call-output-hidden: show-tool-output nil: [ok] icon only
+;;     - tool-call-diff-shown: diff branch, show-tool-output t
+;;     - tool-call-diff-hidden: diff branch, show-tool-output nil
+;;   agent-shell-to-go--permission-responder
+;;     - permission-forwarded: permission request forwarding
+;;   agent-shell-to-go--bridge-on-reaction
+;;     - permission-allow: permission-allow clears pending entry
+;;     - permission-reject: permission-reject clears pending entry
+;;   agent-shell-to-go--handle-command
+;;     - help-command: !help command response
+;;     - info-command: !info command response
+;;     - yolo-command: !yolo sets bypassPermissions mode
+;;     - bypass-command: !bypass alias for !yolo
+;;     - safe-command: !safe sets acceptEdits mode
+;;     - accept-command: !accept alias for !safe
+;;     - acceptedits-command: !acceptedits alias for !safe
+;;     - plan-command: !plan sets plan mode
+;;     - planmode-command: !planmode alias for !plan
+;;     - mode-command: !mode returns current mode name
+;;     - stop-command: !stop interrupts a long-running agent
+;;   agent-shell-to-go--on-init-client
+;;     - on-init-client-failure: failure branch when :client is nil
+;;   agent-shell-to-go--on-error
+;;     - on-error-init-failure: ACP init error forwarding
+;;     - on-error-auth-failure: ACP auth error forwarding
+;;     - on-error-prompt-failure: prompt error forwarding
 
 ;;; Code:
 
