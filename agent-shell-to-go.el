@@ -77,7 +77,7 @@ Take your AI agent sessions anywhere — chat from your phone!"
 Connects each active transport eagerly so inbound events work
 before any local agent starts."
   (add-hook 'agent-shell-mode-hook #'agent-shell-to-go-auto-enable)
-  (dolist (transport (agent-shell-to-go--active-transport-objects))
+  (dolist (transport (agent-shell-to-go--all-transport-objects))
     (unless (agent-shell-to-go-transport-connected-p transport)
       (condition-case err
           (agent-shell-to-go-transport-connect transport)
@@ -129,7 +129,7 @@ connected, nil on failure."
 (defun agent-shell-to-go-ensure-all-connected ()
   "Ensure all agent-shell buffers are connected to their transports."
   (interactive)
-  (dolist (transport (agent-shell-to-go--active-transport-objects))
+  (dolist (transport (agent-shell-to-go--all-transport-objects))
     (unless (agent-shell-to-go-transport-connected-p transport)
       (message "agent-shell-to-go: %s transport unhealthy, reconnecting…"
                (agent-shell-to-go-transport-name transport))
@@ -203,14 +203,14 @@ INTERVAL is seconds between checks (default 60)."
 
 ;;;###autoload
 (defun agent-shell-to-go-list-threads (&optional channel-id)
-  "List threads across each active transport, or just CHANNEL-ID if given.
+  "List threads across all configured transports, or just CHANNEL-ID if given.
 Reports to the *Agent Shell Threads* buffer."
   (interactive)
   (let ((now (float-time))
         (buf (get-buffer-create "*Agent Shell Threads*")))
     (with-current-buffer buf
       (erase-buffer)
-      (dolist (transport (agent-shell-to-go--active-transport-objects))
+      (dolist (transport (agent-shell-to-go--all-transport-objects))
         (let* ((name (agent-shell-to-go-transport-name transport))
                (channel
                 (or channel-id
@@ -239,7 +239,7 @@ Reports to the *Agent Shell Threads* buffer."
 
 ;;;###autoload
 (defun agent-shell-to-go-cleanup-old-threads (&optional channel-id dry-run)
-  "Delete threads older than `agent-shell-to-go-cleanup-age-hours' across transports.
+  "Delete threads older than `agent-shell-to-go-cleanup-age-hours' across all configured transports.
 Skips threads that are currently active (have a live buffer).
 Signal prefix arg or DRY-RUN to only report."
   (interactive (list nil current-prefix-arg))
@@ -248,7 +248,7 @@ Signal prefix arg or DRY-RUN to only report."
         (total-deleted 0)
         (total-skipped-active 0)
         (total-skipped-recent 0))
-    (dolist (transport (agent-shell-to-go--active-transport-objects))
+    (dolist (transport (agent-shell-to-go--all-transport-objects))
       (let* ((channel
               (or channel-id
                   (ignore-errors

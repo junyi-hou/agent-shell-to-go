@@ -78,20 +78,44 @@
 (ert-deftest agent-shell-to-go-test-core-transport-registry ()
   "Transports can be registered and retrieved by name."
   (let ((tr (agent-shell-to-go-test-make))
-        (agent-shell-to-go--transports (make-hash-table :test 'eq)))
+        (agent-shell-to-go--transports nil))
     (should (null (agent-shell-to-go-get-transport 'mytest)))
     (agent-shell-to-go-register-transport 'mytest tr)
     (should (eq tr (agent-shell-to-go-get-transport 'mytest)))))
 
-(ert-deftest agent-shell-to-go-test-core-active-transport-objects ()
-  "Active transport list filters to registered transports only."
-  (let ((tr (agent-shell-to-go-test-make))
-        (agent-shell-to-go--transports (make-hash-table :test 'eq))
-        (agent-shell-to-go-active-transports '(registered missing)))
-    (agent-shell-to-go-register-transport 'registered tr)
-    (let ((objs (agent-shell-to-go--active-transport-objects)))
-      (should (= 1 (length objs)))
-      (should (eq tr (car objs))))))
+(ert-deftest agent-shell-to-go-test-core-all-transport-objects ()
+  "All-transport list includes default and alist transports, deduplicated."
+  (let* ((tr1 (agent-shell-to-go-test-make))
+         (tr2 (agent-shell-to-go-test-make))
+         (agent-shell-to-go--transports nil)
+         (agent-shell-to-go-default-transport 'tr1)
+         (agent-shell-to-go-project-transport-alist
+          (list (cons "/work/acme/" 'tr2) (cons "/work/other/" 'tr1))))
+    (agent-shell-to-go-register-transport 'tr1 tr1)
+    (agent-shell-to-go-register-transport 'tr2 tr2)
+    (let ((objs (agent-shell-to-go--all-transport-objects)))
+      (should (= 2 (length objs)))
+      (should (memq tr1 objs))
+      (should (memq tr2 objs)))))
+
+(ert-deftest agent-shell-to-go-test-core-default-transport-prefix-match ()
+  "Longest prefix in alist wins; falls back to default when no match."
+  (let* ((tr-default (agent-shell-to-go-test-make))
+         (tr-work (agent-shell-to-go-test-make))
+         (tr-acme (agent-shell-to-go-test-make))
+         (agent-shell-to-go--transports nil)
+         (agent-shell-to-go-default-transport 'default)
+         (agent-shell-to-go-project-transport-alist
+          (list (cons "/work/" 'work) (cons "/work/acme/" 'acme))))
+    (agent-shell-to-go-register-transport 'default tr-default)
+    (agent-shell-to-go-register-transport 'work tr-work)
+    (agent-shell-to-go-register-transport 'acme tr-acme)
+    (let ((default-directory "/home/user/"))
+      (should (eq tr-default (agent-shell-to-go--get-transport))))
+    (let ((default-directory "/work/other/"))
+      (should (eq tr-work (agent-shell-to-go--get-transport))))
+    (let ((default-directory "/work/acme/myproject/"))
+      (should (eq tr-acme (agent-shell-to-go--get-transport))))))
 
 (ert-deftest agent-shell-to-go-test-core-presentation-expand-truncated ()
   "expand-truncated shows first 500 chars with hint when full text is longer."

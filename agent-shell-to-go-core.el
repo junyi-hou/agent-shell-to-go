@@ -82,12 +82,20 @@ If nil, just creates the directory and starts the agent immediately."
                  (function :tag "Custom setup function"))
   :group 'agent-shell-to-go)
 
-(defcustom agent-shell-to-go-active-transports '(slack)
-  "List of transport names to use.
-Each symbol must be a registered transport (see
-`agent-shell-to-go-register-transport').  Buffers pick the first
-transport in this list when the minor mode is enabled."
-  :type '(repeat symbol)
+(defcustom agent-shell-to-go-default-transport 'slack
+  "Default transport to use for new agent-shell buffers.
+Must be a symbol naming a registered transport (see
+`agent-shell-to-go-register-transport')."
+  :type 'symbol
+  :group 'agent-shell-to-go)
+
+(defcustom agent-shell-to-go-project-transport-alist nil
+  "Alist mapping project path prefixes to transport names.
+Each entry is (PATH . TRANSPORT-NAME).  When an agent-shell buffer is
+started, its `default-directory' is matched against each PATH as a
+prefix; the transport of the longest match wins.  Falls back to
+`agent-shell-to-go-default-transport' when no prefix matches."
+  :type '(alist :key-type directory :value-type symbol)
   :group 'agent-shell-to-go)
 
 (defcustom agent-shell-to-go-cleanup-age-hours 168
@@ -284,27 +292,42 @@ STATUS is a symbol; OUTPUT is a string (may be empty or nil).")
 
 ; Transport registry
 
-(defvar agent-shell-to-go--transports (make-hash-table :test 'eq)
-  "Hash of registered transports, keyed by symbol name.")
+(defvar agent-shell-to-go--transports nil
+  "Alist of (NAME . TRANSPORT) for registered transports.")
 
 (defun agent-shell-to-go-register-transport (name transport)
-  "Register TRANSPORT under NAME (a symbol).
-Later lookups via `agent-shell-to-go-get-transport' return TRANSPORT."
-  (puthash name transport agent-shell-to-go--transports)
+  "Register TRANSPORT under NAME (a symbol)."
+  (setf (alist-get name agent-shell-to-go--transports) transport)
   (agent-shell-to-go--debug "registered transport: %s" name))
 
 (defun agent-shell-to-go-get-transport (name)
   "Return the registered transport named NAME, or nil."
-  (gethash name agent-shell-to-go--transports))
+  (alist-get name agent-shell-to-go--transports))
 
-(defun agent-shell-to-go--active-transport-objects ()
-  "Return transport objects for each name in `agent-shell-to-go-active-transports'."
-  (delq nil (mapcar #'agent-shell-to-go-get-transport agent-shell-to-go-active-transports)))
+(defun agent-shell-to-go--all-transport-objects ()
+  "Return unique transport objects for all configured transports.
+Includes the default and every transport named in
+`agent-shell-to-go-project-transport-alist'."
+  (let* ((names (cons agent-shell-to-go-default-transport
+                      (mapcar #'cdr agent-shell-to-go-project-transport-alist)))
+         (unique (cl-remove-duplicates names)))
+    (delq nil (mapcar #'agent-shell-to-go-get-transport unique))))
 
-(defun agent-shell-to-go--default-transport ()
-  "Return the first active, registered transport, or error."
-  (or (car (agent-shell-to-go--active-transport-objects))
-      (error "No active transport registered; check `agent-shell-to-go-active-transports'")))
+(defun agent-shell-to-go--get-transport ()
+  "Return the transport for the current `default-directory', or error.
+Matches `agent-shell-to-go-project-transport-alist' by longest prefix;
+falls back to `agent-shell-to-go-default-transport'."
+  (let* ((dir (expand-file-name default-directory))
+         (match
+          (car
+           (sort
+            (cl-remove-if-not
+             (lambda (entry) (string-prefix-p (expand-file-name (car entry)) dir))
+             agent-shell-to-go-project-transport-alist)
+            (lambda (a b) (> (length (car a)) (length (car b)))))))
+         (name (if match (cdr match) agent-shell-to-go-default-transport)))
+    (or (agent-shell-to-go-get-transport name)
+        (error "Transport `%s' not registered" name))))
 
 ; Canonical inbound events
 

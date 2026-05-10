@@ -738,7 +738,7 @@ Called via `agent-shell-subscribe-to' with the shell buffer current."
   (let* ((inherited agent-shell-to-go--inherit-state)
          (_ (setq agent-shell-to-go--inherit-state nil))
          (transport
-          (or (map-elt inherited :transport) (agent-shell-to-go--default-transport)))
+          (or (map-elt inherited :transport) (agent-shell-to-go--get-transport)))
          (project-path (agent-shell-to-go--get-project-path)))
     ;; Load credentials / connect if needed
     (unless (agent-shell-to-go-transport-connected-p transport)
@@ -858,7 +858,7 @@ Called via `agent-shell-subscribe-to' with the shell buffer current."
       (unless (derived-mode-p 'agent-shell-mode)
         (user-error "Not an agent-shell buffer"))
       (let* ((transport
-              (or agent-shell-to-go--transport (agent-shell-to-go--default-transport)))
+              (or agent-shell-to-go--transport (agent-shell-to-go--get-transport)))
              (project-path (agent-shell-to-go--get-project-path)))
         (unless (agent-shell-to-go-transport-connected-p transport)
           (agent-shell-to-go-transport-connect transport))
