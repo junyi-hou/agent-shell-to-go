@@ -48,6 +48,7 @@
 ;;     - planmode-command: !planmode alias for !plan
 ;;     - mode-command: !mode returns current mode name
 ;;     - stop-command: !stop interrupts a long-running agent
+;;     - restart-command: !restart synchronously kills buffer, spawns new one with mode re-enabled
 ;;   agent-shell-to-go--on-init-client
 ;;     - on-init-client-failure: failure branch when :client is nil
 ;;   agent-shell-to-go--on-error
@@ -535,6 +536,44 @@ verifies the session becomes idle well before that deadline."
        (agent-shell-to-go-test-bridge--wait-until
         (lambda () (with-current-buffer buf (not (shell-maker-busy))))
         8)))))
+
+(ert-deftest agent-shell-to-go-test-bridge-restart-command ()
+  "!restart kills the old buffer and spawns a new one with mode re-enabled.
+Verifies inherit-state carries transport/channel/thread to the new buffer."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let* ( ;; Make sure that we are using the right mock-acp server
+           (agent-shell-mock-agent-acp-command
+            (list agent-shell-to-go-test-bridge--python "src/main.py"))
+           (old-channel-id (buffer-local-value 'agent-shell-to-go--channel-id buf))
+           (old-thread-id (buffer-local-value 'agent-shell-to-go--thread-id buf)))
+      (agent-shell-to-go-test-inbound-message
+       tr old-channel-id old-thread-id "testuser" "!restart")
+      (should
+       (cl-some
+        (lambda (text) (string-match-p "Restarting agent" text))
+        (agent-shell-to-go-test-bridge--sent-texts tr)))
+      ;; Restart is synchronous — old buffer is dead and new one exists immediately
+      (should (not (buffer-live-p buf)))
+      ;; No "Session ended" — suppressed by --restarting flag
+      (should-not
+       (cl-some
+        (lambda (text) (string-match-p "Session ended" text))
+        (agent-shell-to-go-test-bridge--sent-texts tr)))
+      (let ((new-buf
+             (agent-shell-to-go--find-buffer-for-transport-channel-thread
+              tr old-channel-id old-thread-id)))
+        (should new-buf)
+        (unwind-protect
+            (with-current-buffer new-buf
+              (should agent-shell-to-go-mode)
+              (should (equal agent-shell-to-go--channel-id old-channel-id))
+              (should (equal agent-shell-to-go--thread-id old-thread-id))
+              (should
+               (agent-shell-to-go-test-bridge--wait-until
+                (lambda () (agent-shell-to-go-test-bridge--session-id new-buf))
+                15)))
+          (when (buffer-live-p new-buf)
+            (kill-buffer new-buf)))))))
 
 ;;; init-client and error event handling
 

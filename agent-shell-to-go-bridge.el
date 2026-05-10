@@ -270,9 +270,6 @@ where each entry is a plist with :kind and :option-id."
                         ""
                       "s"))))
          t)
-        ;; ("!latest"
-        ;;  (agent-shell-to-go--send "↓")
-        ;;  t)
         ("!info"
          (let* ((state agent-shell--state)
                 (session-id (map-nested-elt state '(:session :id)))
@@ -316,17 +313,24 @@ where each entry is a plist with :kind and :option-id."
                       :thread-id agent-shell-to-go--thread-id))
                (setq agent-shell-to-go--restarting t)
                (agent-shell-to-go--send "Restarting agent…")
-               (run-at-time
-                0.5 nil
-                (lambda ()
-                  (condition-case restart-err
-                      (progn
-                        (ignore-errors
-                          (agent-shell-interrupt t))
-                        (agent-shell-restart :session-id session-id))
-                    (error
-                     (setq agent-shell-to-go--inherit-state nil)
-                     (message "agent-shell-to-go: restart failed: %s" restart-err))))))
+               (ignore-errors
+                 (agent-shell-interrupt t))
+               (condition-case restart-err
+                   (when-let* ((win (agent-shell-restart :session-id session-id))
+                               (new-buf (and (windowp win) (window-buffer win)))
+                               (_ (buffer-live-p new-buf))
+                               (_
+                                (with-current-buffer new-buf
+                                  (derived-mode-p 'agent-shell-mode))))
+                     (with-current-buffer new-buf
+                       ;; Strictly speaking, we don't need this since
+                       ;; agent-shell-to-go-mode is likely to be already hooked to
+                       ;; agent-shell-mode-hook if we are here. But there is no harm
+                       ;; to do it one more time.
+                       (agent-shell-to-go-mode 1)))
+                 (error
+                  (setq agent-shell-to-go--inherit-state nil)
+                  (message "agent-shell-to-go: restart failed: %s" restart-err))))
            (error
             (setq agent-shell-to-go--inherit-state nil)
             (agent-shell-to-go--send (format "Restart failed: %s" err))))
@@ -444,6 +448,7 @@ Presentation reactions are handled by the main dispatcher registered first."
 ; agent shell subscriptions 
 
 ;; TODO: use the new session-title-changed event
+;; This needs a more recent `agent-shell'
 (defun agent-shell-to-go--fetch-session-title (_event)
   "Fetch session title via ACP and update the thread header."
   (when (and (not agent-shell-to-go--thread-title-updated)
