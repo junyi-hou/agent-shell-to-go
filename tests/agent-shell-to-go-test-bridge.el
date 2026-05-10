@@ -142,6 +142,55 @@ TRANSPORT, waits for the bridge to initialize, then evaluates BODY.  Always kill
        (when (buffer-live-p ,buf)
          (kill-buffer ,buf)))))
 
+(defun agent-shell-to-go-test-bridge--start-session-with-server
+    (server &optional config-fn)
+  "Like `agent-shell-to-go-test-bridge--start-session' but using SERVER script.
+SERVER is a path relative to the mock-acp root (e.g. \"src/init_error_server.py\").
+CONFIG-FN, if provided, is called with the base config alist and must return
+the final config (use it to add extra keys such as :authenticate-request-maker)."
+  (let ((agent-shell-mock-agent-acp-command
+         (list agent-shell-to-go-test-bridge--python server))
+        (default-directory agent-shell-to-go-test-bridge--mock-acp-root))
+    (let ((config (agent-shell-mock-agent-make-agent-config)))
+      (agent-shell-start
+       :config
+       (if config-fn
+           (funcall config-fn config)
+         config)))))
+
+(defmacro agent-shell-to-go-test-bridge--with-error-session
+    (transport buf server config-fn &rest body)
+  "Like `agent-shell-to-go-test-bridge--with-session' but for error-path testing.
+
+Starts a session using SERVER script (path relative to mock-acp root), applies
+CONFIG-FN (or nil) to the base config, enables `agent-shell-to-go-mode'
+immediately (without waiting for session establishment), then evaluates BODY.
+Use this when the server is expected to fail during ACP initialization so the
+normal session-ID wait would time out."
+  (declare (indent 4))
+  `(let* ((,transport (agent-shell-to-go-test-make))
+          (,buf
+           (agent-shell-to-go-test-bridge--start-session-with-server ,server
+                                                                     ,config-fn)))
+     (unwind-protect
+         (progn
+           (with-current-buffer ,buf
+             (cl-letf (((symbol-function 'agent-shell-to-go--get-transport)
+                        (lambda () ,transport)))
+               (agent-shell-to-go-mode 1)))
+           ,@body)
+       (setq agent-shell-to-go--pending-permissions nil)
+       (when (buffer-live-p ,buf)
+         (kill-buffer ,buf)))))
+
+(defmacro agent-shell-to-go-test-bridge--with-mode-stub (&rest body)
+  "Evaluate BODY with `agent-shell--send-request' stubbed to call on-success immediately."
+  `(cl-letf (((symbol-function 'agent-shell--send-request)
+              (lambda (&rest args)
+                (when-let* ((on-success (plist-get args :on-success)))
+                  (funcall on-success nil)))))
+     ,@body))
+
 (defun agent-shell-to-go-test-bridge--send-prompt (buf text)
   "Send TEXT as a prompt in the agent-shell buffer BUF.
 
@@ -332,6 +381,223 @@ Exercises `agent-shell-to-go--handle-command' via the message hook."
         (should (cl-some (lambda (text) (string-match-p "Thread" text)) texts))
         (should (cl-some (lambda (text) (string-match-p "Channel" text)) texts))
         (should (cl-some (lambda (text) (string-match-p "Session" text)) texts))))))
+
+;;; mode commands
+
+(ert-deftest agent-shell-to-go-test-bridge-yolo-command ()
+  "!yolo sets bypassPermissions mode and notifies the transport."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let ((thread-id (buffer-local-value 'agent-shell-to-go--thread-id buf))
+          (channel-id (buffer-local-value 'agent-shell-to-go--channel-id buf)))
+      (agent-shell-to-go-test-bridge--with-mode-stub
+        (agent-shell-to-go-test-inbound-message
+         tr channel-id thread-id "testuser" "!yolo"))
+      (should
+       (cl-some (lambda (text) (string-match-p "Bypass Permissions" text))
+                (agent-shell-to-go-test-bridge--sent-texts tr)))
+      (should
+       (equal "bypassPermissions"
+              (with-current-buffer buf
+                (map-nested-elt agent-shell--state '(:session :mode-id))))))))
+
+(ert-deftest agent-shell-to-go-test-bridge-bypass-command ()
+  "!bypass is an alias for !yolo — sets bypassPermissions mode."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let ((thread-id (buffer-local-value 'agent-shell-to-go--thread-id buf))
+          (channel-id (buffer-local-value 'agent-shell-to-go--channel-id buf)))
+      (agent-shell-to-go-test-bridge--with-mode-stub
+        (agent-shell-to-go-test-inbound-message
+         tr channel-id thread-id "testuser" "!bypass"))
+      (should
+       (cl-some (lambda (text) (string-match-p "Bypass Permissions" text))
+                (agent-shell-to-go-test-bridge--sent-texts tr)))
+      (should
+       (equal "bypassPermissions"
+              (with-current-buffer buf
+                (map-nested-elt agent-shell--state '(:session :mode-id))))))))
+
+(ert-deftest agent-shell-to-go-test-bridge-safe-command ()
+  "!safe sets acceptEdits mode and notifies the transport."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let ((thread-id (buffer-local-value 'agent-shell-to-go--thread-id buf))
+          (channel-id (buffer-local-value 'agent-shell-to-go--channel-id buf)))
+      (agent-shell-to-go-test-bridge--with-mode-stub
+        (agent-shell-to-go-test-inbound-message
+         tr channel-id thread-id "testuser" "!safe"))
+      (should
+       (cl-some (lambda (text) (string-match-p "Accept Edits" text))
+                (agent-shell-to-go-test-bridge--sent-texts tr)))
+      (should
+       (equal "acceptEdits"
+              (with-current-buffer buf
+                (map-nested-elt agent-shell--state '(:session :mode-id))))))))
+
+(ert-deftest agent-shell-to-go-test-bridge-accept-command ()
+  "!accept is an alias for !safe — sets acceptEdits mode."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let ((thread-id (buffer-local-value 'agent-shell-to-go--thread-id buf))
+          (channel-id (buffer-local-value 'agent-shell-to-go--channel-id buf)))
+      (agent-shell-to-go-test-bridge--with-mode-stub
+        (agent-shell-to-go-test-inbound-message
+         tr channel-id thread-id "testuser" "!accept"))
+      (should
+       (cl-some (lambda (text) (string-match-p "Accept Edits" text))
+                (agent-shell-to-go-test-bridge--sent-texts tr)))
+      (should
+       (equal "acceptEdits"
+              (with-current-buffer buf
+                (map-nested-elt agent-shell--state '(:session :mode-id))))))))
+
+(ert-deftest agent-shell-to-go-test-bridge-acceptedits-command ()
+  "!acceptedits is an alias for !safe — sets acceptEdits mode."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let ((thread-id (buffer-local-value 'agent-shell-to-go--thread-id buf))
+          (channel-id (buffer-local-value 'agent-shell-to-go--channel-id buf)))
+      (agent-shell-to-go-test-bridge--with-mode-stub
+        (agent-shell-to-go-test-inbound-message
+         tr channel-id thread-id "testuser" "!acceptedits"))
+      (should
+       (cl-some (lambda (text) (string-match-p "Accept Edits" text))
+                (agent-shell-to-go-test-bridge--sent-texts tr)))
+      (should
+       (equal "acceptEdits"
+              (with-current-buffer buf
+                (map-nested-elt agent-shell--state '(:session :mode-id))))))))
+
+(ert-deftest agent-shell-to-go-test-bridge-plan-command ()
+  "!plan sets plan mode and notifies the transport."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let ((thread-id (buffer-local-value 'agent-shell-to-go--thread-id buf))
+          (channel-id (buffer-local-value 'agent-shell-to-go--channel-id buf)))
+      (agent-shell-to-go-test-bridge--with-mode-stub
+        (agent-shell-to-go-test-inbound-message
+         tr channel-id thread-id "testuser" "!plan"))
+      (should
+       (cl-some (lambda (text) (string-match-p "Plan" text))
+                (agent-shell-to-go-test-bridge--sent-texts tr)))
+      (should
+       (equal "plan"
+              (with-current-buffer buf
+                (map-nested-elt agent-shell--state '(:session :mode-id))))))))
+
+(ert-deftest agent-shell-to-go-test-bridge-planmode-command ()
+  "!planmode is an alias for !plan — sets plan mode."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let ((thread-id (buffer-local-value 'agent-shell-to-go--thread-id buf))
+          (channel-id (buffer-local-value 'agent-shell-to-go--channel-id buf)))
+      (agent-shell-to-go-test-bridge--with-mode-stub
+        (agent-shell-to-go-test-inbound-message
+         tr channel-id thread-id "testuser" "!planmode"))
+      (should
+       (cl-some (lambda (text) (string-match-p "Plan" text))
+                (agent-shell-to-go-test-bridge--sent-texts tr)))
+      (should
+       (equal "plan"
+              (with-current-buffer buf
+                (map-nested-elt agent-shell--state '(:session :mode-id))))))))
+
+(ert-deftest agent-shell-to-go-test-bridge-mode-command ()
+  "!mode returns the current session mode-id."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let ((thread-id (buffer-local-value 'agent-shell-to-go--thread-id buf))
+          (channel-id (buffer-local-value 'agent-shell-to-go--channel-id buf)))
+      (with-current-buffer buf
+        (let ((session (map-elt agent-shell--state :session)))
+          (map-put! session :mode-id "bypassPermissions")
+          (map-put! agent-shell--state :session session)))
+      (agent-shell-to-go-test-inbound-message
+       tr channel-id thread-id "testuser" "!mode")
+      (should
+       (cl-some (lambda (text) (string-match-p "bypassPermissions" text))
+                (agent-shell-to-go-test-bridge--sent-texts tr))))))
+
+(ert-deftest agent-shell-to-go-test-bridge-stop-command ()
+  "!stop interrupts a long_running scenario and notifies the transport.
+The long_running fixture sends 6 steps at 1.5 s each (~9 s total); the test
+verifies the session becomes idle well before that deadline."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let ((thread-id (buffer-local-value 'agent-shell-to-go--thread-id buf))
+          (channel-id (buffer-local-value 'agent-shell-to-go--channel-id buf)))
+      (agent-shell-to-go-test-bridge--send-prompt buf "test long_running")
+      ;; Wait until mock-acp has started producing output
+      (should
+       (agent-shell-to-go-test-bridge--wait-until
+        (lambda () (with-current-buffer buf (shell-maker-busy)))
+        5))
+      ;; !stop fires agent-shell-interrupt synchronously then sends the notice
+      (agent-shell-to-go-test-inbound-message
+       tr channel-id thread-id "testuser" "!stop")
+      (should
+       (cl-some (lambda (text) (string-match-p "Agent interrupted" text))
+                (agent-shell-to-go-test-bridge--sent-texts tr)))
+      ;; Session must become idle well before the uninterrupted 9 s window
+      (should
+       (agent-shell-to-go-test-bridge--wait-until
+        (lambda () (with-current-buffer buf (not (shell-maker-busy))))
+        8)))))
+
+;;; init-client and error event handling
+
+(ert-deftest agent-shell-to-go-test-bridge-on-init-client-failure ()
+  "When init-client fires with :client nil in agent-shell state, failure notice is sent.
+Exercises the failure branch of `agent-shell-to-go--on-init-client'."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (with-current-buffer buf
+      (let ((saved-client (map-elt agent-shell--state :client)))
+        (map-put! agent-shell--state :client nil)
+        (unwind-protect
+            (agent-shell-to-go--on-init-client nil)
+          (map-put! agent-shell--state :client saved-client))))
+    (should
+     (cl-some
+      (lambda (text) (string-match-p "Agent failed to start" text))
+      (agent-shell-to-go-test-bridge--sent-texts tr)))))
+
+(ert-deftest agent-shell-to-go-test-bridge-on-error-init-failure ()
+  "When the ACP server raises an error on initialize, --on-error forwards it to the transport.
+Also verifies --on-init-client does not fire a false \"failed to start\" notice,
+since the client struct was created successfully before the RPC failed."
+  (agent-shell-to-go-test-bridge--with-error-session tr buf "src/init_error_server.py"
+                                                     nil
+    (should
+     (agent-shell-to-go-test-bridge--wait-until
+      (lambda ()
+        (cl-some
+         (lambda (text) (string-match-p "Agent error" text))
+         (agent-shell-to-go-test-bridge--sent-texts tr)))))
+    (should-not
+     (cl-some
+      (lambda (text) (string-match-p "Agent failed to start" text))
+      (agent-shell-to-go-test-bridge--sent-texts tr)))))
+
+(ert-deftest agent-shell-to-go-test-bridge-on-error-auth-failure ()
+  "When the ACP server raises an auth-required error, --on-error forwards it to the transport."
+  (agent-shell-to-go-test-bridge--with-error-session
+      tr buf "src/auth_error_server.py"
+      (lambda (config)
+        (map-put! config :needs-authentication t)
+        (map-put!
+         config
+         :authenticate-request-maker
+         (lambda () (acp-make-authenticate-request :method-id "token" :method "token")))
+        config)
+    (should
+     (agent-shell-to-go-test-bridge--wait-until
+      (lambda ()
+        (cl-some
+         (lambda (text) (string-match-p "Agent error" text))
+         (agent-shell-to-go-test-bridge--sent-texts tr)))))))
+
+(ert-deftest agent-shell-to-go-test-bridge-on-error-prompt-failure ()
+  "When the agent raises an error in response to a prompt, --on-error forwards it to the transport."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (agent-shell-to-go-test-bridge--send-prompt buf "test error")
+    (should
+     (agent-shell-to-go-test-bridge--wait-until
+      (lambda ()
+        (cl-some
+         (lambda (text) (string-match-p "Agent error" text))
+         (agent-shell-to-go-test-bridge--sent-texts tr)))))))
 
 (provide 'agent-shell-to-go-test-bridge)
 ;;; agent-shell-to-go-test-bridge.el ends here
