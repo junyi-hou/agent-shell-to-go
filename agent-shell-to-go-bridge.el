@@ -150,7 +150,7 @@ Keys: :transport :channel-id :thread-id.  Consumed (set to nil) on first use.")
      ((and raw-input (map-elt raw-input 'diff))
       (agent-shell-to-go--parse-unified-diff (map-elt raw-input 'diff))))))
 
-; Send helpers (buffer-context wrappers) 
+; helpers 
 
 (defun agent-shell-to-go--send (text &optional options)
   "Send TEXT via the buffer-local transport.
@@ -162,8 +162,6 @@ OPTIONS is forwarded to `agent-shell-to-go-transport-send-text'."
      agent-shell-to-go--thread-id
      text
      options)))
-
-; Inject message into agent-shell 
 
 (defun agent-shell-to-go--inject-message (text)
   "Inject TEXT into the current agent-shell buffer as if typed locally."
@@ -179,8 +177,6 @@ OPTIONS is forwarded to `agent-shell-to-go-transport-send-text'."
            (format "_Queued_: %s" (agent-shell-to-go--truncate-text text 100))))
       (agent-shell-insert :text text :submit t :no-focus t))))
 
-; Permission helpers 
-
 (defun agent-shell-to-go--find-option-id (options action)
   "Find option id in OPTIONS matching canonical ACTION symbol.
 OPTIONS is the enriched list from `agent-shell-permission-responder-function',
@@ -193,8 +189,6 @@ where each entry is a plist with :kind and :option-id."
     (when-let* ((opt
                  (seq-find (lambda (opt) (member (map-elt opt :kind) kinds)) options)))
       (map-elt opt :option-id))))
-
-; Set agent mode helper 
 
 (defun agent-shell-to-go--set-mode (buffer mode-id mode-name)
   "Set MODE-ID in BUFFER and notify the thread."
