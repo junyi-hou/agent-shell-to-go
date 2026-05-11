@@ -24,6 +24,7 @@
 ;;     - user-message-echoed: user prompt echo to transport
 ;;   agent-shell-to-go--on-turn-complete
 ;;     - agent-message-forwarded: agent message forwarding on turn end
+;;     - agent-message-multiple-chunks-forwarded: multiple chunks accumulated into one send
 ;;     - remote-message-not-echoed: remote-injected messages produce no echo or Processing line
 ;;   agent-shell-to-go--bridge-on-tool-call-update
 ;;     - tool-call-forwarded: tool call forwarding (generic)
@@ -214,6 +215,20 @@ normal session-ID wait would time out."
     (should (agent-shell-to-go-test-bridge--wait-for-ready tr))
     (let ((texts (agent-shell-to-go-test-bridge--sent-texts tr)))
       (should (cl-some (lambda (t) (string-match-p "Paris" t)) texts)))))
+
+(ert-deftest agent-shell-to-go-test-bridge-agent-message-multiple-chunks-forwarded ()
+  "Multiple agent message chunks are accumulated into a single transport send on turn-complete."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (agent-shell-to-go-test-bridge--send-prompt buf "test long_running")
+    (should (agent-shell-to-go-test-bridge--wait-for-ready tr 20))
+    (let* ((texts (agent-shell-to-go-test-bridge--sent-texts tr))
+           (agent-texts (cl-remove-if-not
+                         (lambda (t) (string-match-p "Paris" t))
+                         texts)))
+      ;; All three chunks must be concatenated into one forwarded message,
+      ;; not sent as three separate messages.
+      (should (= 1 (length agent-texts)))
+      (should (= 4 (length (split-string (car agent-texts) "Paris")))))))
 
 (ert-deftest agent-shell-to-go-test-bridge-tool-call-forwarded ()
   "Tool call results are forwarded to the transport."
