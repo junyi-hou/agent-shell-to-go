@@ -184,6 +184,19 @@
                :raw-emoji (symbol-name action)
                :added-p (if (null added-p) t added-p))))
 
+(defun agent-shell-to-go-test-inbound-slash-command
+    (transport channel command &optional args)
+  "Fire a slash-command inbound event on TRANSPORT."
+  (apply #'run-hook-with-args
+         'agent-shell-to-go-slash-command-hook
+         (list :transport transport
+               :channel-id channel
+               :command command
+               :args (or args '())
+               :args-text ""
+               :user "testuser"
+               :interaction-token nil)))
+
 (defun agent-shell-to-go-test-outbound-calls (transport &optional method)
   "Return recorded calls on TRANSPORT, optionally filtered by METHOD."
   (let ((calls (nreverse (copy-sequence

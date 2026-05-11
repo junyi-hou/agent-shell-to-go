@@ -50,6 +50,11 @@
 ;;     - mode-command: !mode returns current mode name
 ;;     - stop-command: !stop interrupts a long-running agent
 ;;     - restart-command: !restart synchronously kills buffer, spawns new one with mode re-enabled
+;;   agent-shell-to-go--bridge-on-slash-command
+;;     - slash-new-agent-nonexistent-folder: /new-agent with missing folder replies with error
+;;     - slash-new-project-missing-arg: /new-project with no project-name replies with usage
+;;     - slash-new-project-existing-dir: /new-project with existing dir replies with error
+;;     - slash-projects-none-open: /projects with no open buffers replies with "No open projects"
 ;;   agent-shell-to-go--on-init-client
 ;;     - on-init-client-nil-client: failure branch when :client is nil
 ;;   agent-shell-to-go--on-error
@@ -608,6 +613,51 @@ Verifies inherit-state carries transport/channel/thread to the new buffer."
 ;;; init-client and error event handling
 
 ;;; slash command handling
+
+(ert-deftest agent-shell-to-go-test-bridge-slash-new-agent-nonexistent-folder ()
+  "/new-agent with a folder that does not exist replies with an error."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf)))
+      (agent-shell-to-go-test-inbound-slash-command
+       tr channel "/new-agent" '(:folder "/nonexistent-agent-shell-to-go-test-folder"))
+      (should
+       (cl-some (lambda (text) (string-match-p "does not exist" text))
+                (agent-shell-to-go-test-bridge--sent-texts tr))))))
+
+(ert-deftest agent-shell-to-go-test-bridge-slash-new-project-missing-arg ()
+  "/new-project with no :project-name replies with usage message."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf)))
+      (agent-shell-to-go-test-inbound-slash-command tr channel "/new-project")
+      (should
+       (cl-some (lambda (text) (string-match-p "Usage" text))
+                (agent-shell-to-go-test-bridge--sent-texts tr))))))
+
+(ert-deftest agent-shell-to-go-test-bridge-slash-new-project-existing-dir ()
+  "/new-project with an already-existing directory replies with an error."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
+           (existing (make-temp-file "ag2g-test-proj" t)))
+      (unwind-protect
+          (let ((agent-shell-to-go-projects-directory (file-name-parent-directory existing)))
+            (agent-shell-to-go-test-inbound-slash-command
+             tr channel "/new-project" `(:project-name ,(file-name-nondirectory existing)))
+            (should
+             (cl-some (lambda (text) (string-match-p "already exists" text))
+                      (agent-shell-to-go-test-bridge--sent-texts tr))))
+        (delete-directory existing t)))))
+
+(ert-deftest agent-shell-to-go-test-bridge-slash-projects-none-open ()
+  "/projects with no mirrored buffers replies with \"No open projects\"."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
+           (agent-shell-to-go--active-buffers (list buf)))
+      (agent-shell-to-go-test-inbound-slash-command tr channel "/projects")
+      (should
+       (cl-some (lambda (text) (string-match-p "No open projects" text))
+                (agent-shell-to-go-test-bridge--sent-texts tr))))))
+
+(ert-deftest agent-shell-to-go-test-bridge-on-init-client-nil-client ()
   "When init-client fires with :client nil in agent-shell state, failure notice is sent.
 Exercises the failure branch of `agent-shell-to-go--on-init-client'."
   (agent-shell-to-go-test-bridge--with-session tr buf

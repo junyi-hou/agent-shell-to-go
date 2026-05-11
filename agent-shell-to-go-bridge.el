@@ -426,7 +426,7 @@ Presentation reactions are handled by the main dispatcher registered first."
             (error
              (agent-shell-to-go--debug "error starting agent: %s" err)))))
     (agent-shell-to-go-transport-send-text
-     transport channel nil (format "Folder does not exist: `%s`" folder))))
+     transport channel-id nil (format "Folder does not exist: `%s`" folder))))
 
 (defun agent-shell-to-go--get-open-projects ()
   "Return list of currently open project paths."
