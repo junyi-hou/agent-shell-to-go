@@ -44,6 +44,9 @@
 (defvar-local agent-shell-to-go--init-client-subscription nil
   "Subscription token for init-client events (failure detection).")
 
+(defvar-local agent-shell-to-go--init-finished-subscription nil
+  "Subscription token for init-finished events (Ready signal for new sessions).")
+
 (defvar-local agent-shell-to-go--error-subscription nil
   "Subscription token for error events.")
 
@@ -413,17 +416,27 @@ Presentation reactions are handled by the main dispatcher registered first."
            (funcall reply "No open projects found")))))))
 
 (defun agent-shell-to-go--start-agent-in-folder (folder transport channel-id)
-  "Start an agent in FOLDER, notify CHANNEL-ID via TRANSPORT."
+  "Start an agent in FOLDER, notify CHANNEL-ID via TRANSPORT.
+Enables `agent-shell-to-go-mode' on the new buffer so it is immediately
+accessible from remote via TRANSPORT and CHANNEL-ID."
   (agent-shell-to-go--debug "starting agent in %s" folder)
   (if (file-directory-p folder)
       (let ((default-directory folder))
         (save-window-excursion
           (condition-case err
-              (progn
+              (let ((bufs-before (agent-shell-buffers)))
+                (setq agent-shell-to-go--inherit-state
+                      (list :transport transport :channel-id channel-id))
                 (funcall agent-shell-to-go-start-agent-function)
+                (when-let* ((new-buf
+                             (cl-find-if (lambda (b) (not (memq b bufs-before)))
+                                         (agent-shell-buffers))))
+                  (with-current-buffer new-buf
+                    (agent-shell-to-go-mode 1)))
                 (agent-shell-to-go-transport-send-text
                  transport channel-id nil (format "Agent started in `%s`" folder)))
             (error
+             (setq agent-shell-to-go--inherit-state nil)
              (agent-shell-to-go--debug "error starting agent: %s" err)))))
     (agent-shell-to-go-transport-send-text
      transport channel-id nil (format "Folder does not exist: `%s`" folder))))
@@ -557,6 +570,11 @@ is not ready.  Returns t to suppress the Emacs permission UI."
              agent-shell-to-go--thread-id
              (not (map-elt agent-shell--state :client)))
     (agent-shell-to-go--send "*Agent failed to start* — check API key / OAuth token")))
+
+(defun agent-shell-to-go--on-init-finished (_event)
+  "Handle init-finished event.  Notify remote that the session is connected."
+  (when (and agent-shell-to-go-mode agent-shell-to-go--thread-id)
+    (agent-shell-to-go--send "_Connected_")))
 
 (defun agent-shell-to-go--on-error (event)
   "Handle error event.  Forward the error message to the remote transport."
@@ -780,6 +798,14 @@ Called via `agent-shell-subscribe-to' with the shell buffer current."
            :shell-buffer (current-buffer)
            :event 'init-client
            :on-event #'agent-shell-to-go--on-init-client))
+    ;; Subscribe to init-finished to send Ready when a new session connects.
+    ;; init-client fires synchronously inside agent-shell-start so it is too
+    ;; early; init-finished fires async after the ACP handshake completes.
+    (setq agent-shell-to-go--init-finished-subscription
+          (agent-shell-subscribe-to
+           :shell-buffer (current-buffer)
+           :event 'init-finished
+           :on-event #'agent-shell-to-go--on-init-finished))
     ;; Subscribe to error events and forward to remote transport
     (setq agent-shell-to-go--error-subscription
           (agent-shell-subscribe-to
@@ -820,6 +846,7 @@ Called via `agent-shell-subscribe-to' with the shell buffer current."
   (dolist (sub
            (list
             agent-shell-to-go--init-client-subscription
+            agent-shell-to-go--init-finished-subscription
             agent-shell-to-go--error-subscription
             agent-shell-to-go--turn-complete-subscription
             agent-shell-to-go--ready-subscription
@@ -829,6 +856,7 @@ Called via `agent-shell-subscribe-to' with the shell buffer current."
         (agent-shell-unsubscribe :subscription sub))))
   (setq
    agent-shell-to-go--init-client-subscription nil
+   agent-shell-to-go--init-finished-subscription nil
    agent-shell-to-go--error-subscription nil
    agent-shell-to-go--turn-complete-subscription nil
    agent-shell-to-go--ready-subscription nil

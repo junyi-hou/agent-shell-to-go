@@ -52,6 +52,7 @@
 ;;     - restart-command: !restart synchronously kills buffer, spawns new one with mode re-enabled
 ;;   agent-shell-to-go--bridge-on-slash-command
 ;;     - slash-new-agent-nonexistent-folder: /new-agent with missing folder replies with error
+;;     - slash-new-agent-success: /new-agent with valid folder starts agent and confirms
 ;;     - slash-new-project-missing-arg: /new-project with no project-name replies with usage
 ;;     - slash-new-project-existing-dir: /new-project with existing dir replies with error
 ;;     - slash-projects-none-open: /projects with no open buffers replies with "No open projects"
@@ -227,9 +228,8 @@ normal session-ID wait would time out."
     (agent-shell-to-go-test-bridge--send-prompt buf "test long_running")
     (should (agent-shell-to-go-test-bridge--wait-for-ready tr 20))
     (let* ((texts (agent-shell-to-go-test-bridge--sent-texts tr))
-           (agent-texts (cl-remove-if-not
-                         (lambda (t) (string-match-p "Paris" t))
-                         texts)))
+           (agent-texts
+            (cl-remove-if-not (lambda (t) (string-match-p "Paris" t)) texts)))
       ;; All three chunks must be concatenated into one forwarded message,
       ;; not sent as three separate messages.
       (should (= 1 (length agent-texts)))
@@ -621,8 +621,51 @@ Verifies inherit-state carries transport/channel/thread to the new buffer."
       (agent-shell-to-go-test-inbound-slash-command
        tr channel "/new-agent" '(:folder "/nonexistent-agent-shell-to-go-test-folder"))
       (should
-       (cl-some (lambda (text) (string-match-p "does not exist" text))
-                (agent-shell-to-go-test-bridge--sent-texts tr))))))
+       (cl-some
+        (lambda (text) (string-match-p "does not exist" text))
+        (agent-shell-to-go-test-bridge--sent-texts tr))))))
+
+(ert-deftest agent-shell-to-go-test-bridge-slash-new-agent-success ()
+  "/new-agent with a valid folder starts agent, enables mode, and is accessible from remote.
+Verifies mode is on with inherited transport/channel, and that a Connected
+notice is sent via init-finished once the ACP handshake completes."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
+           (temp-dir (make-temp-file "ag2g-test-new-agent" t))
+           (new-buf nil))
+      (unwind-protect
+          (let ((agent-shell-to-go-start-agent-function
+                 (lambda ()
+                   (let ((agent-shell-mock-agent-acp-command
+                          (list agent-shell-to-go-test-bridge--python "src/main.py"))
+                         (default-directory
+                          agent-shell-to-go-test-bridge--mock-acp-root))
+                     (setq new-buf
+                           (agent-shell-start
+                            :config (agent-shell-mock-agent-make-agent-config)))))))
+            (agent-shell-to-go-test-inbound-slash-command
+             tr channel "/new-agent" `(:folder ,temp-dir))
+            (should
+             (cl-some
+              (lambda (text) (string-match-p "Agent started in" text))
+              (agent-shell-to-go-test-bridge--sent-texts tr)))
+            (should (buffer-live-p new-buf))
+            (with-current-buffer new-buf
+              (should agent-shell-to-go-mode)
+              (should (eq agent-shell-to-go--transport tr))
+              (should (equal agent-shell-to-go--channel-id channel)))
+            ;; The new session sends "_Connected_" via init-finished once the ACP
+            ;; handshake completes, signalling the agent is ready for input.
+            (should
+             (agent-shell-to-go-test-bridge--wait-until
+              (lambda ()
+                (cl-some
+                 (lambda (text) (string-match-p "Connected" text))
+                 (agent-shell-to-go-test-bridge--sent-texts tr)))
+              15)))
+        (delete-directory temp-dir t)
+        (when (and new-buf (buffer-live-p new-buf))
+          (kill-buffer new-buf))))))
 
 (ert-deftest agent-shell-to-go-test-bridge-slash-new-project-missing-arg ()
   "/new-project with no :project-name replies with usage message."
