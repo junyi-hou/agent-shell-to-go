@@ -921,7 +921,7 @@ Must be called once after initial bot setup or command changes."
              (description . "List active agent-shell projects")
              (type . 1))]))
     (agent-shell-to-go--discord-api "PUT" endpoint commands)
-    (message "agent-shell-to-go: Discord commands registered (%s)"
+    (agent-shell-to-go--debug "Discord commands registered (%s)"
              (if gid
                  "guild-scoped"
                "global"))))

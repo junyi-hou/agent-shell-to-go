@@ -330,7 +330,7 @@ where each entry is a plist with :kind and :option-id."
                        (agent-shell-to-go-mode 1)))
                  (error
                   (setq agent-shell-to-go--inherit-state nil)
-                  (message "agent-shell-to-go: restart failed: %s" restart-err))))
+                  (agent-shell-to-go--debug "restart failed: %s" restart-err))))
            (error
             (setq agent-shell-to-go--inherit-state nil)
             (agent-shell-to-go--send (format "Restart failed: %s" err))))
@@ -520,7 +520,7 @@ is not ready.  Returns t to suppress the Emacs permission UI."
                   "*Permission Required*\n`%s`\n\nReact to approve, deny, or always allow."
                   title))
               (error
-               (message "agent-shell-to-go permission notify error: %s" err)
+               (agent-shell-to-go--debug "permission notify error: %s" err)
                nil))))
         (if msg-id
             (progn
@@ -914,7 +914,7 @@ Called via `agent-shell-subscribe-to' with the shell buffer current."
         (add-hook 'kill-buffer-hook #'agent-shell-to-go--on-buffer-kill nil t)
         (unless agent-shell-to-go-mode
           (setq agent-shell-to-go-mode t))
-        (message "Reconnected %s (new thread)" (buffer-name buf))))))
+        (agent-shell-to-go--debug "reconnected %s (new thread)" (buffer-name buf))))))
 
 (defun agent-shell-to-go--bridge-buffer-connected-p (&optional buffer)
   "Return non-nil if BUFFER has a valid transport connection."

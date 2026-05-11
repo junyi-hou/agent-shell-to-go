@@ -82,7 +82,7 @@ before any local agent starts."
       (condition-case err
           (agent-shell-to-go-transport-connect transport)
         (error
-         (message "agent-shell-to-go: failed to connect %s: %s"
+         (agent-shell-to-go--debug "failed to connect %s: %s"
                   (agent-shell-to-go-transport-name transport)
                   err))))))
 
@@ -122,7 +122,7 @@ connected, nil on failure."
             (agent-shell-to-go--bridge-reconnect-buffer buf)
             'connected)
         (error
-         (message "Failed to connect %s: %s" (buffer-name buf) err)
+         (agent-shell-to-go--debug "failed to connect %s: %s" (buffer-name buf) err)
          nil)))))
 
 ;;;###autoload
@@ -131,7 +131,7 @@ connected, nil on failure."
   (interactive)
   (dolist (transport (agent-shell-to-go--all-transport-objects))
     (unless (agent-shell-to-go-transport-connected-p transport)
-      (message "agent-shell-to-go: %s transport unhealthy, reconnecting…"
+      (agent-shell-to-go--debug "%s transport unhealthy, reconnecting…"
                (agent-shell-to-go-transport-name transport))
       (condition-case err
           (agent-shell-to-go-transport-connect transport)
@@ -153,7 +153,7 @@ connected, nil on failure."
         ('connected (cl-incf connected))
         (_ (cl-incf failed))))
     (when (or (> connected 0) (> failed 0))
-      (message "agent-shell-to-go: %d newly connected, %d already, %d failed"
+      (agent-shell-to-go--debug "%d newly connected, %d already, %d failed"
                connected
                already
                failed))))
@@ -169,7 +169,7 @@ INTERVAL is seconds between checks (default 60)."
   (agent-shell-to-go-stop-periodic-check)
   (setq agent-shell-to-go--ensure-timer
         (run-with-timer 0 (or interval 60) #'agent-shell-to-go-ensure-all-connected))
-  (message "agent-shell-to-go: periodic connection check every %ds" (or interval 60)))
+  (agent-shell-to-go--debug "periodic connection check every %ds" (or interval 60)))
 
 ;;;###autoload
 (defun agent-shell-to-go-stop-periodic-check ()
@@ -178,7 +178,7 @@ INTERVAL is seconds between checks (default 60)."
   (when agent-shell-to-go--ensure-timer
     (cancel-timer agent-shell-to-go--ensure-timer)
     (setq agent-shell-to-go--ensure-timer nil)
-    (message "agent-shell-to-go: periodic check stopped")))
+    (agent-shell-to-go--debug "periodic check stopped")))
 
 ;;;###autoload
 (defun agent-shell-to-go-reconnect-all ()
@@ -198,8 +198,8 @@ INTERVAL is seconds between checks (default 60)."
             (agent-shell-to-go--bridge-reconnect-buffer buf)
             (cl-incf reconnected))
         (error
-         (message "Failed to reconnect %s: %s" (buffer-name buf) err))))
-    (message "agent-shell-to-go: reconnected %d/%d buffers" reconnected (length bufs))))
+         (agent-shell-to-go--debug "failed to reconnect %s: %s" (buffer-name buf) err))))
+    (agent-shell-to-go--debug "reconnected %d/%d buffers" reconnected (length bufs))))
 
 ;;;###autoload
 (defun agent-shell-to-go-list-threads (&optional channel-id)
@@ -281,7 +281,7 @@ Signal prefix arg or DRY-RUN to only report."
                   (cl-incf total-deleted))
               (error
                (agent-shell-to-go--debug "delete-thread failed: %s" err)))))))
-    (message "agent-shell-to-go cleanup: %s %d threads (active %d, recent %d)"
+    (agent-shell-to-go--debug "cleanup: %s %d threads (active %d, recent %d)"
              (if dry-run
                  "would delete"
                "deleted")
