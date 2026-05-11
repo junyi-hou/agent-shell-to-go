@@ -51,9 +51,9 @@
 ;;     - stop-command: !stop interrupts a long-running agent
 ;;     - restart-command: !restart synchronously kills buffer, spawns new one with mode re-enabled
 ;;   agent-shell-to-go--on-init-client
-;;     - on-init-client-failure: failure branch when :client is nil
+;;     - on-init-client-nil-client: failure branch when :client is nil
 ;;   agent-shell-to-go--on-error
-;;     - on-error-init-failure: ACP init error forwarding
+;;     - on-error-server-init-error: ACP init error forwarding
 ;;     - on-error-auth-failure: ACP auth error forwarding
 ;;     - on-error-prompt-failure: prompt error forwarding
 
@@ -607,7 +607,7 @@ Verifies inherit-state carries transport/channel/thread to the new buffer."
 
 ;;; init-client and error event handling
 
-(ert-deftest agent-shell-to-go-test-bridge-on-init-client-failure ()
+;;; slash command handling
   "When init-client fires with :client nil in agent-shell state, failure notice is sent.
 Exercises the failure branch of `agent-shell-to-go--on-init-client'."
   (agent-shell-to-go-test-bridge--with-session tr buf
@@ -622,7 +622,7 @@ Exercises the failure branch of `agent-shell-to-go--on-init-client'."
       (lambda (text) (string-match-p "Agent failed to start" text))
       (agent-shell-to-go-test-bridge--sent-texts tr)))))
 
-(ert-deftest agent-shell-to-go-test-bridge-on-error-init-failure ()
+(ert-deftest agent-shell-to-go-test-bridge-on-error-server-init-error ()
   "When the ACP server raises an error on initialize, --on-error forwards it to the transport.
 Also verifies --on-init-client does not fire a false \"failed to start\" notice,
 since the client struct was created successfully before the RPC failed."
