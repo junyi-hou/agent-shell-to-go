@@ -103,7 +103,7 @@ Default is 7 days."
   :type 'number
   :group 'agent-shell-to-go)
 
-; Shared utilities
+; Shared utilities 
 
 (defconst agent-shell-to-go--debug-buffer-name "*agent-shell-to-go-debug*"
   "Name of the buffer used for debug logging.")
@@ -322,11 +322,7 @@ falls back to `agent-shell-to-go-default-transport'."
 
 (defconst agent-shell-to-go--canonical-reaction-actions
   '(hide
-    expand-truncated
-    expand-full
-    permission-allow
-    permission-always
-    permission-reject)
+    expand-truncated expand-full permission-allow permission-always permission-reject)
   "Closed set of canonical reaction action symbols.
 Transports map raw reactions to these when firing the reaction hook.")
 
@@ -364,7 +360,7 @@ Plist argument:
   :user              remote user id
   :interaction-token opaque ack token (nil on Slack)")
 
-; Storage helpers 
+; Storage helpers (for truncated/hidden texts) 
 
 (defconst agent-shell-to-go--max-message-length 3800
   "Maximum body length for a transport message (with buffer for extra markup).")
@@ -503,8 +499,7 @@ This runs before bridge handlers so the bridge never sees presentation reactions
 (add-hook
  'agent-shell-to-go-reaction-hook #'agent-shell-to-go--handle-presentation-reaction)
 
-; Generic WebSocket state machine
-;;
+; Generic WebSocket state machine 
 ;; Transports that speak WebSocket use this via `agent-shell-to-go--ws-connect'.
 ;; They pass a URL-FN (callable returning the current ws URL) plus frame and
 ;; close handlers.  Reconnect and backoff live here.
@@ -583,7 +578,7 @@ Closes any existing socket first."
   (let ((sock (and ws (agent-shell-to-go--ws-websocket ws))))
     (and sock (websocket-openp sock))))
 
-; Slash command arg schemas
+; Slash command arg schemas 
 
 (defconst agent-shell-to-go--slash-command-schemas
   '(("/new-agent" (:folder string)) ("/new-project" (:project-name string)))
