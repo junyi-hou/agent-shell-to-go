@@ -32,7 +32,7 @@
 ; Discord-specific defcustoms
 
 (defcustom agent-shell-to-go-discord-bot-token nil
-  "Discord bot token.  Loaded from env file if nil."
+  "Discord bot token."
   :type 'string
   :group 'agent-shell-to-go)
 
@@ -65,12 +65,6 @@ If nil, NO ONE can interact (secure by default)."
 (defcustom agent-shell-to-go-discord-channels-file
   (expand-file-name "agent-shell-to-go-discord-channels.el" user-emacs-directory)
   "File to persist Discord project-to-channel mappings."
-  :type 'string
-  :group 'agent-shell-to-go)
-
-(defcustom agent-shell-to-go-discord-env-file "~/.doom.d/.env"
-  "Dotenv file containing Discord credentials.
-Keys read: DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, DISCORD_CHANNEL_ID."
   :type 'string
   :group 'agent-shell-to-go)
 
@@ -219,23 +213,6 @@ Returns the parsed JSON response or nil."
        "\n_... truncated_")
     text))
 
-; Credential loading
-
-(defun agent-shell-to-go--discord-load-env ()
-  "Load Discord credentials from the env file if not already set."
-  (let ((pairs
-         (agent-shell-to-go--env-file-parse
-          agent-shell-to-go-discord-env-file
-          '("DISCORD_BOT_TOKEN" "DISCORD_GUILD_ID" "DISCORD_CHANNEL_ID"))))
-    (dolist (pair pairs)
-      (pcase (car pair)
-        ("DISCORD_BOT_TOKEN" (unless agent-shell-to-go-discord-bot-token
-           (setq agent-shell-to-go-discord-bot-token (cdr pair))))
-        ("DISCORD_GUILD_ID" (unless agent-shell-to-go-discord-guild-id
-           (setq agent-shell-to-go-discord-guild-id (cdr pair))))
-        ("DISCORD_CHANNEL_ID" (unless agent-shell-to-go-discord-channel-id
-           (setq agent-shell-to-go-discord-channel-id (cdr pair))))))))
-
 ; Channel management (internal)
 
 (defun agent-shell-to-go--discord-load-channels (transport)
@@ -350,7 +327,6 @@ Returns the parsed JSON response or nil."
 (cl-defmethod agent-shell-to-go-transport-connect
     ((transport agent-shell-to-go-discord-transport))
   "Connect the Discord transport via Gateway WebSocket."
-  (agent-shell-to-go--discord-load-env)
   (unless agent-shell-to-go-discord-bot-token
     (error "agent-shell-to-go-discord-bot-token not set"))
   (agent-shell-to-go--discord-load-channels transport)
@@ -890,7 +866,6 @@ commands (active immediately).  Without a guild ID, commands are global
 (may take up to 1 hour to propagate).
 Must be called once after initial bot setup or command changes."
   (interactive)
-  (agent-shell-to-go--discord-load-env)
   (unless agent-shell-to-go-discord-bot-token
     (error "agent-shell-to-go-discord-bot-token not set"))
   (let* ((gid (or guild-id agent-shell-to-go-discord-guild-id))

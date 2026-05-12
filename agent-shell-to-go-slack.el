@@ -20,12 +20,12 @@
 ; Slack-specific defcustoms 
 
 (defcustom agent-shell-to-go-slack-bot-token nil
-  "Slack bot token (xoxb-...).  Loaded from env file if nil."
+  "Slack bot token (xoxb-...)."
   :type 'string
   :group 'agent-shell-to-go)
 
 (defcustom agent-shell-to-go-slack-app-token nil
-  "Slack app-level token (xapp-...) for Socket Mode.  Loaded from env if nil."
+  "Slack app-level token (xapp-...) for Socket Mode."
   :type 'string
   :group 'agent-shell-to-go)
 
@@ -61,12 +61,6 @@ If nil, NO ONE can interact (secure by default)."
   :type 'string
   :group 'agent-shell-to-go)
 
-(defcustom agent-shell-to-go-slack-env-file "~/.doom.d/.env"
-  "Path to a dotenv file containing Slack credentials.
-Keys read: SLACK_BOT_TOKEN, SLACK_APP_TOKEN, SLACK_CHANNEL_ID, SLACK_USER_ID."
-  :type 'string
-  :group 'agent-shell-to-go)
-
 ;; Backward-compatibility aliases for the old unprefixed names.
 (defvaralias 'agent-shell-to-go-bot-token 'agent-shell-to-go-slack-bot-token)
 (defvaralias 'agent-shell-to-go-app-token 'agent-shell-to-go-slack-app-token)
@@ -78,7 +72,6 @@ Keys read: SLACK_BOT_TOKEN, SLACK_APP_TOKEN, SLACK_CHANNEL_ID, SLACK_USER_ID."
              'agent-shell-to-go-slack-per-project-channels)
 (defvaralias 'agent-shell-to-go-channel-prefix 'agent-shell-to-go-slack-channel-prefix)
 (defvaralias 'agent-shell-to-go-channels-file 'agent-shell-to-go-slack-channels-file)
-(defvaralias 'agent-shell-to-go-env-file 'agent-shell-to-go-slack-env-file)
 (make-obsolete-variable
  'agent-shell-to-go-bot-token 'agent-shell-to-go-slack-bot-token "0.3.0")
 (make-obsolete-variable
@@ -97,8 +90,6 @@ Keys read: SLACK_BOT_TOKEN, SLACK_APP_TOKEN, SLACK_CHANNEL_ID, SLACK_USER_ID."
  'agent-shell-to-go-channel-prefix 'agent-shell-to-go-slack-channel-prefix "0.3.0")
 (make-obsolete-variable
  'agent-shell-to-go-channels-file 'agent-shell-to-go-slack-channels-file "0.3.0")
-(make-obsolete-variable
- 'agent-shell-to-go-env-file 'agent-shell-to-go-slack-env-file "0.3.0")
 
 ; Reaction map (raw Slack emoji → canonical action) 
 
@@ -155,25 +146,6 @@ METHOD is GET or POST, ENDPOINT is without the base URL, DATA is the payload."
       (apply #'call-process "curl" nil t nil args)
       (goto-char (point-min))
       (json-read))))
-
-; Credential loading 
-
-(defun agent-shell-to-go--slack-load-env ()
-  "Load Slack credentials from the env file if not already set."
-  (let ((pairs
-         (agent-shell-to-go--env-file-parse
-          agent-shell-to-go-slack-env-file
-          '("SLACK_BOT_TOKEN" "SLACK_APP_TOKEN" "SLACK_CHANNEL_ID" "SLACK_USER_ID"))))
-    (dolist (pair pairs)
-      (pcase (car pair)
-        ("SLACK_BOT_TOKEN" (unless agent-shell-to-go-slack-bot-token
-           (setq agent-shell-to-go-slack-bot-token (cdr pair))))
-        ("SLACK_APP_TOKEN" (unless agent-shell-to-go-slack-app-token
-           (setq agent-shell-to-go-slack-app-token (cdr pair))))
-        ("SLACK_CHANNEL_ID" (unless agent-shell-to-go-slack-channel-id
-           (setq agent-shell-to-go-slack-channel-id (cdr pair))))
-        ("SLACK_USER_ID" (unless agent-shell-to-go-slack-user-id
-           (setq agent-shell-to-go-slack-user-id (cdr pair))))))))
 
 ; Channel management (internal) 
 

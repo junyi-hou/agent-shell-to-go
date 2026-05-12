@@ -150,21 +150,6 @@ Lowercase, replace invalid characters with hyphens, max 80 chars."
                (car (project-roots proj)))))
       default-directory))
 
-(defun agent-shell-to-go--env-file-parse (path keys)
-  "Parse a dotenv-style FILE at PATH, extracting KEYS.
-KEYS is a list of key strings.  Returns alist of (key . value)."
-  (when (file-exists-p path)
-    (let (result)
-      (with-temp-buffer
-        (insert-file-contents (expand-file-name path))
-        (goto-char (point-min))
-        (while (re-search-forward "^\\([A-Z_]+\\)=\\(.+\\)$" nil t)
-          (let ((k (match-string 1))
-                (v (match-string 2)))
-            (when (member k keys)
-              (push (cons k v) result)))))
-      (nreverse result))))
-
 ; Transport protocol
 
 (cl-defstruct agent-shell-to-go-transport
