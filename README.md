@@ -1,7 +1,7 @@
 # agent-shell-to-go
 
 > Forked from [ElleNajt's repo](https://github.com/ElleNajt/agent-shell-to-go). The development of the original package has been dropped and replaced by a more generic ACP multiplexer (one agent connecting to multiple clients) and dedicated frontends.
-
+>
 > I believe that an agent-shell specific tool that enable remote agent control is still valuable since
 > - I do not have a use case where I want to control the agent from both emacs and remote at the same time, so a proper multiplexer and a dedicated frontend sounds an overkill to me.
 > - My agent-specific config (launch flags, plugins, MCP, environment variables) are all set in emacs and agent-shell. Maintaining a separate configuration for a different agent feels repeatitive.

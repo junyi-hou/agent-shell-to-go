@@ -55,7 +55,6 @@
 ;;     - slash-new-agent-success: /new-agent with valid folder starts agent and confirms
 ;;     - slash-new-project-missing-arg: /new-project with no project-name replies with usage
 ;;     - slash-new-project-existing-dir: /new-project with existing dir replies with error
-;;     - slash-projects-none-open: /projects with no open buffers replies with "No open projects"
 ;;   agent-shell-to-go--on-init-client
 ;;     - on-init-client-nil-client: failure branch when :client is nil
 ;;   agent-shell-to-go--on-error
