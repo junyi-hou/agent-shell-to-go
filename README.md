@@ -1,10 +1,12 @@
 # agent-shell-to-go
 
-> Forked from [ElleNajt's repo](https://github.com/ElleNajt/agent-shell-to-go) and extend to support Slack + Discord.
+> Forked from [ElleNajt's repo](https://github.com/ElleNajt/agent-shell-to-go). The development of the original package has been dropped and replaced by a more generic ACP multiplexer (one agent connecting to multiple clients) and dedicated frontends.
+
+> I believe that an agent-shell specific tool that enable remote agent control is still valuable since
+> - I do not have a use case where I want to control the agent from both emacs and remote at the same time, so a proper multiplexer and a dedicated frontend sounds an overkill to me.
+> - My agent-specific config (launch flags, plugins, MCP, environment variables) are all set in emacs and agent-shell. Maintaining a separate configuration for a different agent feels repeatitive.
 
 Take your [agent-shell](https://github.com/xenodium/agent-shell) sessions anywhere. Chat with your AI agents from your phone or any device.
-
-Pairs well with [meta-agent-shell](https://github.com/ElleNajt/meta-agent-shell) for monitoring and coordinating multiple agents.
 
 | Emacs | Slack (message from phone) | Slack (follow-up from Emacs) |
 |-------|---------------------------|------------------------------|
@@ -24,16 +26,16 @@ Planned/possible integrations:
 
 ## Features
 
-- **Per-project channels** - each project gets its own Slack channel automatically
-- Each agent-shell session gets its own thread within the project channel
-- Messages flow bidirectionally (Emacs ↔ messaging platform)
-- Real-time updates via WebSocket
+- **Per-project channels** - each project gets its own channel automatically
+    - Each agent-shell session gets its own thread within the project channel
+    - Messages flow bidirectionally (Emacs ↔ messaging platform)
+    - Real-time updates via WebSocket
 - **Message queuing** - messages sent while the agent is busy are queued and processed automatically
-- Permission requests with reaction-based approval
-- Mode switching via commands (`!yolo`, `!safe`, `!plan`)
-- Start new agents remotely via slash commands
-- **Error forwarding** - agent startup failures and API errors are automatically reported to the Slack thread
-- Works with any agent-shell agent (Claude Code, Gemini, etc.)
+    - Permission requests with reaction-based approval
+    - Mode switching via commands (`!yolo`, `!safe`, `!plan`)
+    - Start new agents remotely via slash commands
+- **Error forwarding** - agent startup failures and API errors are automatically reported to the thread
+    - Works with any agent-shell agent (Claude Code, Gemini, etc.)
 
 ## Setup
 
