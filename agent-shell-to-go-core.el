@@ -177,7 +177,7 @@ Each transport knows its own user-id format.")
 (cl-defgeneric agent-shell-to-go-transport-bot-user-id (transport)
   "Return the bot/self user-id for TRANSPORT, used for dedup.")
 
-;; Send / Edit
+;; Send / edit / upload
 
 (cl-defgeneric agent-shell-to-go-transport-send-text
     (transport channel-id thread-id text &optional options)
@@ -193,6 +193,10 @@ Returns a message-id string.")
     (transport channel-id message-id text)
   "Edit MESSAGE-ID on TRANSPORT in CHANNEL-ID to be TEXT.
 Returns non-nil if the edit succeeded.")
+
+(cl-defgeneric agent-shell-to-go-transport-upload-file
+    (transport channel-id thread-id path &optional comment)
+  "Upload PATH to CHANNEL under THREAD-ID with optional COMMENT.")
 
 (cl-defgeneric agent-shell-to-go-transport-acknowledge-interaction
     (transport interaction-token &optional options)
