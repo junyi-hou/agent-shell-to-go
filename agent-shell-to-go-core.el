@@ -365,6 +365,10 @@ Plist argument:
   :interaction-token opaque ack token (nil on Slack)")
 
 ; Storage helpers (for truncated/hidden texts) 
+;; TODO: Replace truncation/hide mechanism with message splitting across multiple
+;; transport sends.  Splitting removes the need for expand reactions and handles
+;; agent messages (currently not truncated), which can also exceed transport limits
+;; (Discord: 2000 chars, Slack: 4000 chars).
 
 (defconst agent-shell-to-go--max-message-length 3800
   "Maximum body length for a transport message (with buffer for extra markup).")
