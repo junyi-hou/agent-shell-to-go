@@ -180,8 +180,8 @@ Each transport knows its own user-id format.")
 ;; Send / edit / upload
 
 (cl-defgeneric agent-shell-to-go-transport-send-text
-    (transport channel thread-id text &optional options)
-  "Send TEXT on TRANSPORT to CHANNEL under THREAD-ID.
+    (transport channel-id thread-id text &optional options)
+  "Send TEXT on TRANSPORT to CHANNEL-ID under THREAD-ID.
 OPTIONS is a plist, possibly including:
   :truncate           truncate long content, store the rest for expansion
   :ephemeral          only visible to :user-id
@@ -190,56 +190,59 @@ OPTIONS is a plist, possibly including:
 Returns a message-id string.")
 
 (cl-defgeneric agent-shell-to-go-transport-edit-message
-    (transport channel message-id text)
-  "Edit MESSAGE-ID on TRANSPORT in CHANNEL to be TEXT.
+    (transport channel-id message-id text)
+  "Edit MESSAGE-ID on TRANSPORT in CHANNEL-ID to be TEXT.
 Returns non-nil if the edit succeeded.")
 
 (cl-defgeneric agent-shell-to-go-transport-upload-file
-    (transport channel thread-id path &optional comment)
+    (transport channel-id thread-id path &optional comment)
   "Upload PATH to CHANNEL under THREAD-ID with optional COMMENT.")
 
 (cl-defgeneric agent-shell-to-go-transport-acknowledge-interaction
     (transport interaction-token &optional options)
-  "Acknowledge a transport interaction for INTERACTION-TOKEN.
+  "Acknowledge a TRANSPORT interaction for INTERACTION-TOKEN.
 Required on Discord for the 3-second interaction rule; no-op on Slack.
 OPTIONS may include :ephemeral or :deferred.")
 
 ;; Read
 
 (cl-defgeneric agent-shell-to-go-transport-get-message-text
-    (transport channel message-id)
-  "Return the text of MESSAGE-ID in CHANNEL on TRANSPORT.")
+    (transport channel-id message-id)
+  "Return the text of MESSAGE-ID in CHANNEL-ID on TRANSPORT.")
 
-(cl-defgeneric agent-shell-to-go-transport-get-reactions (transport channel message-id)
-  "Return canonical reaction actions for MESSAGE-ID in CHANNEL on TRANSPORT.
+(cl-defgeneric agent-shell-to-go-transport-get-reactions
+    (transport channel-id message-id)
+  "Return canonical reaction actions for MESSAGE-ID in CHANNEL-ID on TRANSPORT.
 Transports translate raw emoji to canonical actions before returning.")
 
 (cl-defgeneric agent-shell-to-go-transport-fetch-thread-replies
-    (transport channel thread-id)
-  "Return a list of reply plists for THREAD-ID in CHANNEL on TRANSPORT.
+    (transport channel-id thread-id)
+  "Return a list of reply plists for THREAD-ID in CHANNEL-ID on TRANSPORT.
 Each plist has keys :msg-id :user :text.")
 
 ;; Threads & channels
 
-(cl-defgeneric agent-shell-to-go-transport-start-thread (transport channel label)
-  "Start a new thread on TRANSPORT in CHANNEL with LABEL.  Return thread id.")
+(cl-defgeneric agent-shell-to-go-transport-start-thread (transport channel-id label)
+  "Start a new thread on TRANSPORT in CHANNEL-ID with LABEL.  Return thread id.")
 
 (cl-defgeneric agent-shell-to-go-transport-update-thread-header
-    (transport channel thread-id title)
-  "Update the thread header for THREAD-ID in CHANNEL to TITLE.")
+    (transport channel-id thread-id title)
+  "Update the thread header on TRANSPORT for THREAD-ID in CHANNEL-ID to TITLE.")
 
-(cl-defgeneric agent-shell-to-go-transport-ensure-project-channel
+(cl-defgeneric agent-shell-to-go-transport-ensure-project-channel-id
     (transport project-path)
   "Return the top-level posting destination on TRANSPORT for PROJECT-PATH.")
 
-(cl-defgeneric agent-shell-to-go-transport-list-threads (transport channel)
-  "Return a list of thread plists (:thread-id :last-timestamp) in CHANNEL.")
+(cl-defgeneric agent-shell-to-go-transport-list-threads (transport channel-id)
+  "Return a list of thread plists (:thread-id :last-timestamp) in CHANNEL-ID from TRANSPORT.")
 
-(cl-defgeneric agent-shell-to-go-transport-delete-message (transport channel message-id)
-  "Delete MESSAGE-ID in CHANNEL on TRANSPORT.")
+(cl-defgeneric agent-shell-to-go-transport-delete-message
+    (transport channel-id message-id)
+  "Delete MESSAGE-ID in CHANNEL-ID on TRANSPORT.")
 
-(cl-defgeneric agent-shell-to-go-transport-delete-thread (transport channel thread-id)
-  "Delete THREAD-ID (all messages) in CHANNEL on TRANSPORT.")
+(cl-defgeneric agent-shell-to-go-transport-delete-thread
+    (transport channel-id thread-id)
+  "Delete THREAD-ID (all messages) in CHANNEL-ID on TRANSPORT.")
 
 ;; Formatting (semantic; transport renders its own markup)
 
@@ -248,7 +251,7 @@ Each plist has keys :msg-id :user :text.")
 
 (cl-defgeneric agent-shell-to-go-transport-format-tool-call-result
     (transport title status output)
-  "Return rendered string for a tool call result on TRANSPORT.
+  "Return rendered string for a tool call result on TRANSPORT with TITLE.
 STATUS is a symbol; OUTPUT is a string (may be empty or nil).")
 
 (cl-defgeneric agent-shell-to-go-transport-format-diff (transport old-text new-text)
@@ -266,7 +269,7 @@ STATUS is a symbol; OUTPUT is a string (may be empty or nil).")
 ;; Storage root (with default method)
 
 (cl-defgeneric agent-shell-to-go-transport-storage-root (transport)
-  "Return the per-transport on-disk storage directory.")
+  "Return the TRANSPORT specific on-disk storage directory.")
 
 (cl-defmethod agent-shell-to-go-transport-storage-root
     ((transport agent-shell-to-go-transport))
@@ -384,19 +387,19 @@ Plist argument:
         (concat (substring text 0 max-len) "\n_… expand for more_")
       text)))
 
-(defun agent-shell-to-go--hidden-path (transport channel msg-id)
-  "Return path for hidden MSG-ID in CHANNEL on TRANSPORT."
-  (expand-file-name (format "hidden/%s/%s.txt" channel msg-id)
+(defun agent-shell-to-go--hidden-path (transport channel-id msg-id)
+  "Return path for hidden MSG-ID in CHANNEL-ID on TRANSPORT."
+  (expand-file-name (format "hidden/%s/%s.txt" channel-id msg-id)
                     (agent-shell-to-go-transport-storage-root transport)))
 
-(defun agent-shell-to-go--truncated-path (transport channel msg-id)
-  "Return path for truncated MSG-ID full text in CHANNEL on TRANSPORT."
-  (expand-file-name (format "truncated/%s/%s.txt" channel msg-id)
+(defun agent-shell-to-go--truncated-path (transport channel-id msg-id)
+  "Return path for truncated MSG-ID full text in CHANNEL-ID on TRANSPORT."
+  (expand-file-name (format "truncated/%s/%s.txt" channel-id msg-id)
                     (agent-shell-to-go-transport-storage-root transport)))
 
-(defun agent-shell-to-go--collapsed-path (transport channel msg-id)
-  "Return path for collapsed form of MSG-ID in CHANNEL on TRANSPORT."
-  (concat (agent-shell-to-go--truncated-path transport channel msg-id) ".collapsed"))
+(defun agent-shell-to-go--collapsed-path (transport channel-id msg-id)
+  "Return path for collapsed form of MSG-ID in CHANNEL-ID on TRANSPORT."
+  (concat (agent-shell-to-go--truncated-path transport channel-id msg-id) ".collapsed"))
 
 (defun agent-shell-to-go--save-file (path text)
   "Save TEXT to PATH, creating directories as needed."
@@ -411,40 +414,40 @@ Plist argument:
       (insert-file-contents path)
       (buffer-string))))
 
-(defun agent-shell-to-go--save-hidden-message (transport channel msg-id text)
+(defun agent-shell-to-go--save-hidden-message (transport channel-id msg-id text)
   "Save original TEXT for hidden MSG-ID."
   (agent-shell-to-go--save-file
-   (agent-shell-to-go--hidden-path transport channel msg-id) text))
+   (agent-shell-to-go--hidden-path transport channel-id msg-id) text))
 
-(defun agent-shell-to-go--load-hidden-message (transport channel msg-id)
+(defun agent-shell-to-go--load-hidden-message (transport channel-id msg-id)
   "Load original text for hidden MSG-ID."
   (agent-shell-to-go--load-file
-   (agent-shell-to-go--hidden-path transport channel msg-id)))
+   (agent-shell-to-go--hidden-path transport channel-id msg-id)))
 
-(defun agent-shell-to-go--delete-hidden-message-file (transport channel msg-id)
+(defun agent-shell-to-go--delete-hidden-message-file (transport channel-id msg-id)
   "Delete hidden MSG-ID file."
-  (let ((path (agent-shell-to-go--hidden-path transport channel msg-id)))
+  (let ((path (agent-shell-to-go--hidden-path transport channel-id msg-id)))
     (when (file-exists-p path)
       (delete-file path))))
 
 (defun agent-shell-to-go--save-truncated-message
-    (transport channel msg-id full-text &optional collapsed-text)
+    (transport channel-id msg-id full-text &optional collapsed-text)
   "Save FULL-TEXT for MSG-ID.  Optionally also save COLLAPSED-TEXT."
   (agent-shell-to-go--save-file
-   (agent-shell-to-go--truncated-path transport channel msg-id) full-text)
+   (agent-shell-to-go--truncated-path transport channel-id msg-id) full-text)
   (when collapsed-text
     (agent-shell-to-go--save-file
-     (agent-shell-to-go--collapsed-path transport channel msg-id) collapsed-text)))
+     (agent-shell-to-go--collapsed-path transport channel-id msg-id) collapsed-text)))
 
-(defun agent-shell-to-go--load-truncated-message (transport channel msg-id)
+(defun agent-shell-to-go--load-truncated-message (transport channel-id msg-id)
   "Load full text for MSG-ID."
   (agent-shell-to-go--load-file
-   (agent-shell-to-go--truncated-path transport channel msg-id)))
+   (agent-shell-to-go--truncated-path transport channel-id msg-id)))
 
-(defun agent-shell-to-go--load-collapsed-message (transport channel msg-id)
+(defun agent-shell-to-go--load-collapsed-message (transport channel-id msg-id)
   "Load collapsed form for MSG-ID, if any."
   (agent-shell-to-go--load-file
-   (agent-shell-to-go--collapsed-path transport channel msg-id)))
+   (agent-shell-to-go--collapsed-path transport channel-id msg-id)))
 
 ; Presentation-reaction dispatcher 
 
@@ -459,14 +462,16 @@ This runs before bridge handlers so the bridge never sees presentation reactions
                    transport channel-id msg-id)))
        (agent-shell-to-go--save-hidden-message transport channel-id msg-id text)
        (agent-shell-to-go-transport-edit-message
+        transport channel-id msg-id "_message hidden_")))
     (`(nil . hide)
-     (when-let* ((original (agent-shell-to-go--load-hidden-message
-                             transport channel msg-id)))
-       (agent-shell-to-go-transport-edit-message transport channel msg-id original)
-       (agent-shell-to-go--delete-hidden-message-file transport channel msg-id)))
+     (when-let* ((original
+                  (agent-shell-to-go--load-hidden-message transport channel-id msg-id)))
+       (agent-shell-to-go-transport-edit-message transport channel-id msg-id original)
+       (agent-shell-to-go--delete-hidden-message-file transport channel-id msg-id)))
     (`(t . expand-truncated)
-     (when-let* ((full (agent-shell-to-go--load-truncated-message
-                        transport channel msg-id)))
+     (when-let* ((full
+                  (agent-shell-to-go--load-truncated-message
+                   transport channel-id msg-id)))
        (let* ((too-long (> (length full) agent-shell-to-go--truncated-view-length))
               (display
                (if too-long
@@ -477,19 +482,28 @@ This runs before bridge handlers so the bridge never sees presentation reactions
          (agent-shell-to-go-transport-edit-message
           transport channel-id msg-id display))))
     (`(t . expand-full)
-                        transport channel msg-id)))
+     (when-let* ((full
+                  (agent-shell-to-go--load-truncated-message
+                   transport channel-id msg-id)))
        (let* ((too-long (> (length full) agent-shell-to-go--max-message-length))
-              (display (if too-long
-                           (concat (substring full 0 agent-shell-to-go--max-message-length)
-                                   agent-shell-to-go--truncation-note)
-                         full)))
-         (agent-shell-to-go-transport-edit-message transport channel msg-id display))))
+              (display
+               (if too-long
+                   (concat
+                    (substring full 0 agent-shell-to-go--max-message-length)
+                    agent-shell-to-go--truncation-note)
+                 full)))
+         (agent-shell-to-go-transport-edit-message
+          transport channel-id msg-id display))))
     ((or `(nil . expand-truncated) `(nil . expand-full))
-     (let* ((collapsed (agent-shell-to-go--load-collapsed-message transport channel msg-id))
-            (full (agent-shell-to-go--load-truncated-message transport channel msg-id))
-            (restore (or collapsed (and full (agent-shell-to-go--truncate-text full 500)))))
+     (let* ((collapsed
+             (agent-shell-to-go--load-collapsed-message transport channel-id msg-id))
+            (full
+             (agent-shell-to-go--load-truncated-message transport channel-id msg-id))
+            (restore
+             (or collapsed (and full (agent-shell-to-go--truncate-text full 500)))))
        (when restore
-         (agent-shell-to-go-transport-edit-message transport channel msg-id restore))))))
+         (agent-shell-to-go-transport-edit-message
+          transport channel-id msg-id restore))))))
 
 (add-hook
  'agent-shell-to-go-reaction-hook #'agent-shell-to-go--handle-presentation-reaction)
