@@ -324,7 +324,6 @@ falls back to `agent-shell-to-go-default-transport'."
   '(hide
     expand-truncated
     expand-full
-    collapse
     permission-allow
     permission-always
     permission-reject)
