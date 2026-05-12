@@ -25,12 +25,10 @@
   :group 'agent-shell
   :prefix "agent-shell-to-go-")
 
-; Defcustoms
+; custom variables 
 
 (defcustom agent-shell-to-go-default-folder
-  (let ((default-folder (expand-file-name ".agent-shell-to-go" (expand-file-name "~"))))
-    (make-directory default-folder t)
-    default-folder)
+  (expand-file-name ".agent-shell-to-go" (expand-file-name "~"))
   "Default folder for `/new-agent' when no folder is specified."
   :type 'string
   :group 'agent-shell-to-go)

@@ -383,9 +383,10 @@ Presentation reactions are handled by the main dispatcher registered first."
           (lambda (text)
             (agent-shell-to-go-transport-send-text transport channel-id nil text))))
     (pcase command
-      ("/new-agent" (let ((folder
-              (expand-file-name
-               (or (map-elt typed-args :folder) agent-shell-to-go-default-folder))))
+      ("/new-agent" (let* ((explicit-folder (map-elt typed-args :folder))
+                          (folder (expand-file-name
+                                   (or explicit-folder agent-shell-to-go-default-folder))))
+         (unless explicit-folder (make-directory folder t))
          (agent-shell-to-go--start-agent-in-folder folder transport channel-id)))
       ("/new-project" (let ((project-name (map-elt typed-args :project-name)))
          (if (not project-name)
