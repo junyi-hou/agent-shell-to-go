@@ -40,7 +40,7 @@ Override if you have a custom starter function."
   :group 'agent-shell-to-go)
 
 (defcustom agent-shell-to-go-debug nil
-  "When non-nil, log debug messages to *Messages*."
+  "When non-nil, log debug messages to *agent-shell-to-go-debug*."
   :type 'boolean
   :group 'agent-shell-to-go)
 
@@ -76,8 +76,9 @@ Each transport gets a subdirectory named after it."
 Called with (PROJECT-NAME BASE-DIR CALLBACK).
 CALLBACK is called with PROJECT-DIR when setup is complete.
 If nil, just creates the directory and starts the agent immediately."
-  :type '(choice (const :tag "Just create directory" nil)
-                 (function :tag "Custom setup function"))
+  :type
+  '(choice
+    (const :tag "Just create directory" nil) (function :tag "Custom setup function"))
   :group 'agent-shell-to-go)
 
 (defcustom agent-shell-to-go-default-transport 'slack
@@ -117,8 +118,9 @@ Does nothing when `agent-shell-to-go-debug' is nil."
       (with-current-buffer buf
         (goto-char (point-max))
         (insert line)
-        (let ((excess (- (count-lines (point-min) (point-max))
-                         agent-shell-to-go-event-log-max-entries)))
+        (let ((excess
+               (- (count-lines (point-min) (point-max))
+                  agent-shell-to-go-event-log-max-entries)))
           (when (> excess 0)
             (goto-char (point-min))
             (forward-line excess)
@@ -150,7 +152,7 @@ Lowercase, replace invalid characters with hyphens, max 80 chars."
                (car (project-roots proj)))))
       default-directory))
 
-; Transport protocol
+; Transport protocol 
 
 (cl-defstruct agent-shell-to-go-transport
   "Base struct for transport implementations.
@@ -273,7 +275,7 @@ STATUS is a symbol; OUTPUT is a string (may be empty or nil).")
                             (symbol-name (agent-shell-to-go-transport-name transport)))
                     agent-shell-to-go-storage-base-dir))
 
-; Transport registry
+; Transport registry 
 
 (defvar agent-shell-to-go--transports nil
   "Alist of (NAME . TRANSPORT) for registered transports.")
@@ -291,8 +293,10 @@ STATUS is a symbol; OUTPUT is a string (may be empty or nil).")
   "Return unique transport objects for all configured transports.
 Includes the default and every transport named in
 `agent-shell-to-go-project-transport-alist'."
-  (let* ((names (cons agent-shell-to-go-default-transport
-                      (mapcar #'cdr agent-shell-to-go-project-transport-alist)))
+  (let* ((names
+          (cons
+           agent-shell-to-go-default-transport
+           (mapcar #'cdr agent-shell-to-go-project-transport-alist)))
          (unique (cl-remove-duplicates names)))
     (delq nil (mapcar #'agent-shell-to-go-get-transport unique))))
 
@@ -303,16 +307,19 @@ falls back to `agent-shell-to-go-default-transport'."
   (let* ((dir (expand-file-name default-directory))
          (match
           (car
-           (sort
-            (cl-remove-if-not
-             (lambda (entry) (string-prefix-p (expand-file-name (car entry)) dir))
-             agent-shell-to-go-project-transport-alist)
-            (lambda (a b) (> (length (car a)) (length (car b)))))))
-         (name (if match (cdr match) agent-shell-to-go-default-transport)))
+           (sort (cl-remove-if-not
+                  (lambda (entry)
+                    (string-prefix-p (expand-file-name (car entry)) dir))
+                  agent-shell-to-go-project-transport-alist)
+                 (lambda (a b) (> (length (car a)) (length (car b)))))))
+         (name
+          (if match
+              (cdr match)
+            agent-shell-to-go-default-transport)))
     (or (agent-shell-to-go-get-transport name)
         (error "Transport `%s' not registered" name))))
 
-; Canonical inbound events
+; Canonical inbound events 
 
 (defconst agent-shell-to-go--canonical-reaction-actions
   '(hide
@@ -359,7 +366,7 @@ Plist argument:
   :user              remote user id
   :interaction-token opaque ack token (nil on Slack)")
 
-; Storage helpers
+; Storage helpers 
 
 (defconst agent-shell-to-go--max-message-length 3800
   "Maximum body length for a transport message (with buffer for extra markup).")
@@ -439,7 +446,7 @@ Plist argument:
   (agent-shell-to-go--load-file
    (agent-shell-to-go--collapsed-path transport channel msg-id)))
 
-; Presentation-reaction dispatcher
+; Presentation-reaction dispatcher 
 
 (cl-defun agent-shell-to-go--handle-presentation-reaction
     (&key transport channel-id msg-id action added-p &allow-other-keys)
@@ -447,11 +454,11 @@ Plist argument:
 This runs before bridge handlers so the bridge never sees presentation reactions."
   (pcase (cons added-p action)
     (`(t . hide)
-     (when-let* ((text (agent-shell-to-go-transport-get-message-text
-                        transport channel msg-id)))
-       (agent-shell-to-go--save-hidden-message transport channel msg-id text)
+     (when-let* ((text
+                  (agent-shell-to-go-transport-get-message-text
+                   transport channel-id msg-id)))
+       (agent-shell-to-go--save-hidden-message transport channel-id msg-id text)
        (agent-shell-to-go-transport-edit-message
-        transport channel msg-id "_message hidden_")))
     (`(nil . hide)
      (when-let* ((original (agent-shell-to-go--load-hidden-message
                              transport channel msg-id)))
@@ -461,13 +468,15 @@ This runs before bridge handlers so the bridge never sees presentation reactions
      (when-let* ((full (agent-shell-to-go--load-truncated-message
                         transport channel msg-id)))
        (let* ((too-long (> (length full) agent-shell-to-go--truncated-view-length))
-              (display (if too-long
-                           (concat (substring full 0 agent-shell-to-go--truncated-view-length)
-                                   "\n_… expand further for full output_")
-                         full)))
-         (agent-shell-to-go-transport-edit-message transport channel msg-id display))))
+              (display
+               (if too-long
+                   (concat
+                    (substring full 0 agent-shell-to-go--truncated-view-length)
+                    "\n_… expand further for full output_")
+                 full)))
+         (agent-shell-to-go-transport-edit-message
+          transport channel-id msg-id display))))
     (`(t . expand-full)
-     (when-let* ((full (agent-shell-to-go--load-truncated-message
                         transport channel msg-id)))
        (let* ((too-long (> (length full) agent-shell-to-go--max-message-length))
               (display (if too-long
@@ -482,8 +491,8 @@ This runs before bridge handlers so the bridge never sees presentation reactions
        (when restore
          (agent-shell-to-go-transport-edit-message transport channel msg-id restore))))))
 
-(add-hook 'agent-shell-to-go-reaction-hook
-          #'agent-shell-to-go--handle-presentation-reaction)
+(add-hook
+ 'agent-shell-to-go-reaction-hook #'agent-shell-to-go--handle-presentation-reaction)
 
 ; Generic WebSocket state machine
 ;;
@@ -527,13 +536,15 @@ Closes any existing socket first."
            :on-close
            (lambda (_w)
              (agent-shell-to-go--debug "ws[%s] closed" (agent-shell-to-go--ws-name ws))
-             (when close-fn (funcall close-fn))
+             (when close-fn
+               (funcall close-fn))
              (unless (agent-shell-to-go--ws-intentional-close ws)
                (agent-shell-to-go--ws-reconnect ws)))
            :on-error
            (lambda (_w _t err)
              (agent-shell-to-go--debug "ws[%s] error: %s"
-                                       (agent-shell-to-go--ws-name ws) err))))))
+                                       (agent-shell-to-go--ws-name ws)
+                                       err))))))
 
 (defun agent-shell-to-go--ws-reconnect (ws)
   "Schedule WS to reconnect after its backoff."
@@ -566,8 +577,7 @@ Closes any existing socket first."
 ; Slash command arg schemas
 
 (defconst agent-shell-to-go--slash-command-schemas
-  '(("/new-agent" (:folder string))
-    ("/new-project" (:project-name string)))
+  '(("/new-agent" (:folder string)) ("/new-project" (:project-name string)))
   "Per-command arg schemas for transports that need to parse text args.
 Each entry is (COMMAND . SCHEMA).  Transports consult this when
 converting raw text to a typed args plist for the slash-command hook.")
