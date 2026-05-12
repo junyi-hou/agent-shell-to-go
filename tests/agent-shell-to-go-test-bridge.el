@@ -673,8 +673,9 @@ notice is sent via init-finished once the ACP handshake completes."
     (let ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf)))
       (agent-shell-to-go-test-inbound-slash-command tr channel "/new-project")
       (should
-       (cl-some (lambda (text) (string-match-p "Usage" text))
-                (agent-shell-to-go-test-bridge--sent-texts tr))))))
+       (cl-some
+        (lambda (text) (string-match-p "Usage" text))
+        (agent-shell-to-go-test-bridge--sent-texts tr))))))
 
 (ert-deftest agent-shell-to-go-test-bridge-slash-new-project-existing-dir ()
   "/new-project with an already-existing directory replies with an error."
@@ -682,23 +683,19 @@ notice is sent via init-finished once the ACP handshake completes."
     (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
            (existing (make-temp-file "ag2g-test-proj" t)))
       (unwind-protect
-          (let ((agent-shell-to-go-projects-directory (file-name-parent-directory existing)))
+          (let ((agent-shell-to-go-projects-directory
+                 (file-name-parent-directory existing)))
             (agent-shell-to-go-test-inbound-slash-command
-             tr channel "/new-project" `(:project-name ,(file-name-nondirectory existing)))
+             tr
+             channel
+             "/new-project"
+             `(:project-name ,(file-name-nondirectory existing)))
             (should
-             (cl-some (lambda (text) (string-match-p "already exists" text))
-                      (agent-shell-to-go-test-bridge--sent-texts tr))))
+             (cl-some
+              (lambda (text) (string-match-p "already exists" text))
+              (agent-shell-to-go-test-bridge--sent-texts tr))))
         (delete-directory existing t)))))
 
-(ert-deftest agent-shell-to-go-test-bridge-slash-projects-none-open ()
-  "/projects with no mirrored buffers replies with \"No open projects\"."
-  (agent-shell-to-go-test-bridge--with-session tr buf
-    (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
-           (agent-shell-to-go--active-buffers (list buf)))
-      (agent-shell-to-go-test-inbound-slash-command tr channel "/projects")
-      (should
-       (cl-some (lambda (text) (string-match-p "No open projects" text))
-                (agent-shell-to-go-test-bridge--sent-texts tr))))))
 
 (ert-deftest agent-shell-to-go-test-bridge-on-init-client-nil-client ()
   "When init-client fires with :client nil in agent-shell state, failure notice is sent.

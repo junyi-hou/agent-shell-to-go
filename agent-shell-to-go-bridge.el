@@ -407,13 +407,7 @@ Presentation reactions are handled by the main dispatcher registered first."
                               start-fn)
                    (make-directory project-dir t)
                    (funcall start-fn project-dir))))))))
-      ("/projects" (let ((projects (agent-shell-to-go--get-open-projects)))
-         (if projects
-             (progn
-               (funcall reply "*Open Projects:*")
-               (dolist (p projects)
-                 (funcall reply p)))
-           (funcall reply "No open projects found")))))))
+)))
 
 (defun agent-shell-to-go--start-agent-in-folder (folder transport channel-id)
   "Start an agent in FOLDER, notify CHANNEL-ID via TRANSPORT.
@@ -440,23 +434,6 @@ accessible from remote via TRANSPORT and CHANNEL-ID."
              (agent-shell-to-go--debug "error starting agent: %s" err)))))
     (agent-shell-to-go-transport-send-text
      transport channel-id nil (format "Folder does not exist: `%s`" folder))))
-
-(defun agent-shell-to-go--get-open-projects ()
-  "Return list of currently open project paths."
-  (delete-dups
-   (delq
-    nil
-    (cond
-     ((fboundp 'projectile-open-projects)
-      (projectile-open-projects))
-     ((fboundp 'project-known-project-roots)
-      (project-known-project-roots))
-     (t
-      (mapcar
-       (lambda (buf)
-         (when-let* ((f (buffer-file-name buf)))
-           (file-name-directory f)))
-       (buffer-list)))))))
 
 ; agent shell subscriptions 
 
