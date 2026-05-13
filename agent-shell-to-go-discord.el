@@ -122,29 +122,19 @@ to enable each action."
   (project-channels (make-hash-table :test 'equal))
   (thread-parents (make-hash-table :test 'equal))) ; thread-channel-id → parent-forum-channel-id
 
-(defun agent-shell-to-go--discord-api (method endpoint &optional data)
+(defun agent-shell-to-go--discord-request (method endpoint extra-curl-args)
   "Make a Discord REST API call via curl.
-METHOD is \"GET\", \"POST\", \"PATCH\", \"PUT\", or \"DELETE\".
-ENDPOINT is the path without the base URL.
-DATA is the request body alist, JSON-encoded.
+METHOD is the HTTP method, ENDPOINT is the path without the base URL.
+EXTRA-CURL-ARGS are appended after the base headers (body flags, form fields, etc.).
 Returns the parsed JSON response or nil."
   (let* ((url (concat agent-shell-to-go--discord-api-base endpoint))
          (token agent-shell-to-go-discord-bot-token)
-         (args
-          (list
-           "-s"
-           "-X"
-           method
-           "-H"
-           (concat "Authorization: Bot " token)
-           "-H"
-           "Content-Type: application/json"
-           "-H"
-           "User-Agent: DiscordBot (agent-shell-to-go, 0.3.1)")))
-    (when data
-      (setq args
-            (append args (list "-d" (encode-coding-string (json-encode data) 'utf-8)))))
-    (setq args (append args (list url)))
+         (args (append
+                (list "-s" "-X" method
+                      "-H" (concat "Authorization: Bot " token)
+                      "-H" "User-Agent: DiscordBot (agent-shell-to-go, 0.3.1)")
+                extra-curl-args
+                (list url))))
     (with-temp-buffer
       (apply #'call-process "curl" nil t nil args)
       (goto-char (point-min))
@@ -155,35 +145,23 @@ Returns the parsed JSON response or nil."
            (agent-shell-to-go--debug "discord-api json-read error: %s" err)
            nil))))))
 
+(defun agent-shell-to-go--discord-api (method endpoint &optional data)
+  "Make a Discord REST API call, encoding DATA as JSON."
+  (agent-shell-to-go--discord-request
+   method endpoint
+   (when data
+     (list "-H" "Content-Type: application/json"
+           "-d" (encode-coding-string (json-encode data) 'utf-8)))))
+
 (defun agent-shell-to-go--discord-api-upload (channel-id path &optional comment)
   "Upload PATH as a file attachment to Discord CHANNEL-ID with optional COMMENT."
-  (let* ((url
-          (format "%s/channels/%s/messages"
-                  agent-shell-to-go--discord-api-base
-                  channel-id))
-         (token agent-shell-to-go-discord-bot-token)
-         (filename (file-name-nondirectory path))
-         (args
-          (list
-           "-s"
-           "-X"
-           "POST"
-           "-H"
-           (concat "Authorization: Bot " token)
-           "-H"
-           "User-Agent: DiscordBot (agent-shell-to-go, 0.3.1)"
-           "-F"
-           (format "files[0]=@%s;filename=%s" path filename))))
-    (when (and comment (not (string-empty-p comment)))
-      (setq args (append args (list "-F" (format "content=%s" comment)))))
-    (setq args (append args (list url)))
-    (with-temp-buffer
-      (apply #'call-process "curl" nil t nil args)
-      (goto-char (point-min))
-      (condition-case nil
-          (json-read)
-        (error
-         nil)))))
+  (let* ((filename (file-name-nondirectory path))
+         (extra (append
+                 (list "-F" (format "files[0]=@%s;filename=%s" path filename))
+                 (when (and comment (not (string-empty-p comment)))
+                   (list "-F" (format "content=%s" comment))))))
+    (agent-shell-to-go--discord-request
+     "POST" (format "/channels/%s/messages" channel-id) extra)))
 
 (defun agent-shell-to-go--discord-truncate-content (text)
   "Truncate TEXT to fit Discord's content limit, appending a note if cut."
