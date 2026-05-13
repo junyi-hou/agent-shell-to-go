@@ -82,9 +82,10 @@ before any local agent starts."
       (condition-case err
           (agent-shell-to-go-transport-connect transport)
         (error
-         (agent-shell-to-go--debug "failed to connect %s: %s"
-                  (agent-shell-to-go-transport-name transport)
-                  err))))))
+         (agent-shell-to-go--debug
+          "failed to connect %s: %s"
+          (agent-shell-to-go-transport-name transport)
+          err))))))
 
 ;;;###autoload
 (defun agent-shell-to-go-show-debug-log ()
@@ -131,8 +132,9 @@ connected, nil on failure."
   (interactive)
   (dolist (transport (agent-shell-to-go--all-transport-objects))
     (unless (agent-shell-to-go-transport-connected-p transport)
-      (agent-shell-to-go--debug "%s transport unhealthy, reconnecting…"
-               (agent-shell-to-go-transport-name transport))
+      (agent-shell-to-go--debug
+       "%s transport unhealthy, reconnecting…"
+       (agent-shell-to-go-transport-name transport))
       (condition-case err
           (agent-shell-to-go-transport-connect transport)
         (error
@@ -153,10 +155,8 @@ connected, nil on failure."
         ('connected (cl-incf connected))
         (_ (cl-incf failed))))
     (when (or (> connected 0) (> failed 0))
-      (agent-shell-to-go--debug "%d newly connected, %d already, %d failed"
-               connected
-               already
-               failed))))
+      (agent-shell-to-go--debug
+       "%d newly connected, %d already, %d failed" connected already failed))))
 
 (defvar agent-shell-to-go--ensure-timer nil
   "Timer for periodic connection checks.")
@@ -198,7 +198,8 @@ INTERVAL is seconds between checks (default 60)."
             (agent-shell-to-go--bridge-reconnect-buffer buf)
             (cl-incf reconnected))
         (error
-         (agent-shell-to-go--debug "failed to reconnect %s: %s" (buffer-name buf) err))))
+         (agent-shell-to-go--debug
+          "failed to reconnect %s: %s" (buffer-name buf) err))))
     (agent-shell-to-go--debug "reconnected %d/%d buffers" reconnected (length bufs))))
 
 ;;;###autoload
@@ -212,16 +213,16 @@ Reports to the *Agent Shell Threads* buffer."
       (erase-buffer)
       (dolist (transport (agent-shell-to-go--all-transport-objects))
         (let* ((name (agent-shell-to-go-transport-name transport))
-               (channel
+               (channel-id
                 (or channel-id
                     (ignore-errors
                       (agent-shell-to-go-transport-ensure-project-channel
                        transport default-directory)))))
-          (when channel
+          (when channel-id
             (let ((threads
                    (ignore-errors
-                     (agent-shell-to-go-transport-list-threads transport channel))))
-              (insert (format "=== %s :: %s ===\n" name channel))
+                     (agent-shell-to-go-transport-list-threads transport channel-id))))
+              (insert (format "=== %s :: %s ===\n" name channel-id))
               (if (not threads)
                   (insert "(no threads)\n\n")
                 (dolist (thread
@@ -249,22 +250,22 @@ Signal prefix arg or DRY-RUN to only report."
         (total-skipped-active 0)
         (total-skipped-recent 0))
     (dolist (transport (agent-shell-to-go--all-transport-objects))
-      (let* ((channel
+      (let* ((channel-id
               (or channel-id
                   (ignore-errors
                     (agent-shell-to-go-transport-ensure-project-channel
                      transport default-directory))))
              (threads
-              (and channel
+              (and channel-id
                    (ignore-errors
-                     (agent-shell-to-go-transport-list-threads transport channel))))
+                     (agent-shell-to-go-transport-list-threads transport channel-id))))
              (to-delete nil))
         (dolist (thread threads)
           (let* ((ts (map-elt thread :thread-id))
                  (last (or (map-elt thread :last-timestamp) 0))
                  (age (- now last))
                  (active-p
-                  (agent-shell-to-go--bridge-thread-active-p transport channel ts)))
+                  (agent-shell-to-go--bridge-thread-active-p transport channel-id ts)))
             (cond
              (active-p
               (cl-incf total-skipped-active))
@@ -277,15 +278,16 @@ Signal prefix arg or DRY-RUN to only report."
             (condition-case err
                 (progn
                   (agent-shell-to-go-transport-delete-thread
-                   transport channel thread-id)
+                   transport channel-id thread-id)
                   (cl-incf total-deleted))
               (error
                (agent-shell-to-go--debug "delete-thread failed: %s" err)))))))
-    (agent-shell-to-go--debug "cleanup: %s %d threads (active %d, recent %d)"
-             (if dry-run
-                 "would delete"
-               "deleted")
-             total-deleted total-skipped-active total-skipped-recent)))
+    (agent-shell-to-go--debug
+     "cleanup: %s %d threads (active %d, recent %d)"
+     (if dry-run
+         "would delete"
+       "deleted")
+     total-deleted total-skipped-active total-skipped-recent)))
 
 ;;;###autoload
 (defun agent-shell-to-go-cleanup-all-channels (&optional dry-run)
