@@ -7,14 +7,13 @@
 ;; Implements the agent-shell-to-go transport protocol for Discord.
 ;; Use by setting `agent-shell-to-go-default-transport' to `discord'.
 ;;
-;; Layout: each project maps to a Discord Forum channel (type 15); each
+;; Layout: each project maps to a Discord Forum channel (type forum/15); each
 ;; agent-shell session maps to a forum post (thread) within that forum.
 ;; Messages within a session go directly to the forum post's thread channel.
 ;;
 ;; Configuration:
 ;;   (setq agent-shell-to-go-discord-bot-token "Bot ...")
 ;;   (setq agent-shell-to-go-discord-guild-id "12345...")
-;;   (setq agent-shell-to-go-discord-channel-id "67890...") ; default forum channel
 ;;   (setq agent-shell-to-go-discord-authorized-users '("user-id..."))
 ;;
 ;; Prerequisites:
@@ -29,7 +28,7 @@
 
 (require 'agent-shell-to-go-core)
 
-; Discord-specific defcustoms
+; Discord-specific defcustoms 
 
 (defcustom agent-shell-to-go-discord-bot-token nil
   "Discord bot token."
@@ -41,20 +40,10 @@
   :type 'string
   :group 'agent-shell-to-go)
 
-(defcustom agent-shell-to-go-discord-channel-id nil
-  "Default Discord forum channel ID.  Used when per-project channels are disabled."
-  :type 'string
-  :group 'agent-shell-to-go)
-
 (defcustom agent-shell-to-go-discord-authorized-users nil
   "List of Discord user IDs allowed to interact with agents.
 If nil, NO ONE can interact (secure by default)."
   :type '(repeat string)
-  :group 'agent-shell-to-go)
-
-(defcustom agent-shell-to-go-discord-per-project-channels t
-  "When non-nil, create a separate Discord forum channel for each project."
-  :type 'boolean
   :group 'agent-shell-to-go)
 
 (defcustom agent-shell-to-go-discord-channel-prefix ""
@@ -63,19 +52,10 @@ If nil, NO ONE can interact (secure by default)."
   :group 'agent-shell-to-go)
 
 (defcustom agent-shell-to-go-discord-channels-file
-  (expand-file-name "agent-shell-to-go-discord-channels.el" user-emacs-directory)
+  (expand-file-name "var/agent-shell-to-go-discord-channels.el" user-emacs-directory)
   "File to persist Discord project-to-channel mappings."
   :type 'string
   :group 'agent-shell-to-go)
-
-(defcustom agent-shell-to-go-discord-message-content-intent t
-  "When non-nil, request the privileged MESSAGE_CONTENT Gateway intent.
-Required to read message content.  Must be enabled in the Discord
-Developer Portal under Bot → Privileged Gateway Intents."
-  :type 'boolean
-  :group 'agent-shell-to-go)
-
-; Reaction map (custom emoji name → canonical action)
 
 (defcustom agent-shell-to-go-discord-reaction-map
   '((hide . ("see_no_evil" "no_bell"))
@@ -98,8 +78,7 @@ to enable each action."
    (seq-find
     (lambda (pair) (member emoji (cdr pair))) agent-shell-to-go-discord-reaction-map)))
 
-; Constants
-
+;; Constants
 (defconst agent-shell-to-go--discord-api-base "https://discord.com/api/v10"
   "Discord REST API v10 base URL.")
 
@@ -110,7 +89,10 @@ to enable each action."
 (defconst agent-shell-to-go--discord-max-content-length 2000
   "Discord message content character limit.")
 
-;; Gateway opcodes
+(defconst agent-shell-to-go--discord-channel-type-forum 15
+  "Discord channel type for Forum channels.")
+
+;;; Gateway opcodes
 (defconst agent-shell-to-go--discord-op-dispatch 0)
 (defconst agent-shell-to-go--discord-op-heartbeat 1)
 (defconst agent-shell-to-go--discord-op-identify 2)
@@ -125,7 +107,7 @@ to enable each action."
 (defconst agent-shell-to-go--discord-intent-direct-messages 4096)
 (defconst agent-shell-to-go--discord-intent-message-content 32768)
 
-; Struct
+; Struct 
 
 (cl-defstruct (agent-shell-to-go-discord-transport
                (:include agent-shell-to-go-transport)
@@ -139,8 +121,6 @@ to enable each action."
   (processed-ids (make-hash-table :test 'equal))
   (project-channels (make-hash-table :test 'equal))
   (thread-parents (make-hash-table :test 'equal))) ; thread-channel-id → parent-forum-channel-id
-
-; Low-level API helpers
 
 (defun agent-shell-to-go--discord-api (method endpoint &optional data)
   "Make a Discord REST API call via curl.
@@ -175,12 +155,12 @@ Returns the parsed JSON response or nil."
            (agent-shell-to-go--debug "discord-api json-read error: %s" err)
            nil))))))
 
-(defun agent-shell-to-go--discord-api-upload (channel path &optional comment)
-  "Upload PATH as a file attachment to Discord CHANNEL with optional COMMENT."
+(defun agent-shell-to-go--discord-api-upload (channel-id path &optional comment)
+  "Upload PATH as a file attachment to Discord CHANNEL-ID with optional COMMENT."
   (let* ((url
           (format "%s/channels/%s/messages"
                   agent-shell-to-go--discord-api-base
-                  channel))
+                  channel-id))
          (token agent-shell-to-go-discord-bot-token)
          (filename (file-name-nondirectory path))
          (args
@@ -213,7 +193,7 @@ Returns the parsed JSON response or nil."
        "\n_... truncated_")
     text))
 
-; Channel management (internal)
+; Channel management (internal) 
 
 (defun agent-shell-to-go--discord-load-channels (transport)
   "Load project-to-channel mappings into TRANSPORT from disk."
@@ -239,7 +219,7 @@ Returns the parsed JSON response or nil."
       (prin1 data (current-buffer)))))
 
 (defun agent-shell-to-go--discord-find-channel-by-name (name)
-  "Find a guild forum channel (type 15) by NAME. Return its ID or nil."
+  "Find a guild forum channel by NAME. Return its ID or nil."
   (when agent-shell-to-go-discord-guild-id
     (let* ((resp
             (agent-shell-to-go--discord-api
@@ -247,51 +227,52 @@ Returns the parsed JSON response or nil."
            (channels
             (when (vectorp resp)
               (append resp nil))))
-      (map-elt (seq-find
+      (map-elt
+       (seq-find
         (lambda (ch)
-          (and (equal (map-elt ch 'name) name) (= (or (map-elt ch 'type) -1) 15)))
-        channels) 'id))))
+          (and (equal (map-elt ch 'name) name)
+               (= (or (map-elt ch 'type) -1)
+                  agent-shell-to-go--discord-channel-type-forum)))
+        channels)
+       'id))))
 
 (defun agent-shell-to-go--discord-create-channel (name)
-  "Create a Discord forum channel (type 15) named NAME in the guild. Return its ID or nil."
+  "Create a Discord forum channel named NAME in the guild.  Return its ID or nil."
   (when agent-shell-to-go-discord-guild-id
     (let* ((resp
-            (agent-shell-to-go--discord-api "POST"
-                                            (format "/guilds/%s/channels"
-                                                    agent-shell-to-go-discord-guild-id)
-                                            `((name . ,name) (type . 15))))
+            (agent-shell-to-go--discord-api
+             "POST" (format "/guilds/%s/channels" agent-shell-to-go-discord-guild-id)
+             `((name . ,name) (type . ,agent-shell-to-go--discord-channel-type-forum))))
            (id (map-elt resp 'id)))
       (or id (agent-shell-to-go--discord-find-channel-by-name name)))))
 
 (defun agent-shell-to-go--discord-get-or-create-project-channel (transport project-path)
   "Return the Discord forum channel ID for PROJECT-PATH, creating it if needed."
-  (if (not agent-shell-to-go-discord-per-project-channels)
-      agent-shell-to-go-discord-channel-id
-    (let ((cached
-           (gethash
-            project-path
-            (agent-shell-to-go-discord-transport-project-channels transport))))
-      (or cached
-          (let* ((project-name
-                  (file-name-nondirectory (directory-file-name project-path)))
-                 (channel-name
-                  (concat
-                   agent-shell-to-go-discord-channel-prefix
-                   (agent-shell-to-go--sanitize-channel-name project-name)))
-                 (channel-id
-                  (or (agent-shell-to-go--discord-find-channel-by-name channel-name)
-                      (agent-shell-to-go--discord-create-channel channel-name))))
-            (when channel-id
-              (puthash
-               project-path
-               channel-id
-               (agent-shell-to-go-discord-transport-project-channels transport))
-              (agent-shell-to-go--discord-save-channels transport)
-              (agent-shell-to-go--debug
-               "discord channel %s for %s" channel-name project-path))
-            (or channel-id agent-shell-to-go-discord-channel-id))))))
+  (let ((cached
+         (gethash
+          project-path
+          (agent-shell-to-go-discord-transport-project-channels transport))))
+    (or cached
+        (let* ((project-name
+                (file-name-nondirectory (directory-file-name project-path)))
+               (channel-name
+                (concat
+                 agent-shell-to-go-discord-channel-prefix
+                 (agent-shell-to-go--sanitize-channel-name project-name)))
+               (channel-id
+                (or (agent-shell-to-go--discord-find-channel-by-name channel-name)
+                    (agent-shell-to-go--discord-create-channel channel-name))))
+          (when channel-id
+            (puthash
+             project-path
+             channel-id
+             (agent-shell-to-go-discord-transport-project-channels transport))
+            (agent-shell-to-go--discord-save-channels transport)
+            (agent-shell-to-go--debug
+             "discord channel %s for %s" channel-name project-path))
+          channel-id))))
 
-; Formatting helpers
+; Formatting helpers 
 
 (defun agent-shell-to-go--discord-format-diff (old-text new-text)
   "Generate a unified diff string between OLD-TEXT and NEW-TEXT."
@@ -322,7 +303,7 @@ Returns the parsed JSON response or nil."
       (delete-file old-file)
       (delete-file new-file))))
 
-; Transport method implementations
+; Transport method implementations 
 
 (cl-defmethod agent-shell-to-go-transport-connect
     ((transport agent-shell-to-go-discord-transport))
@@ -374,16 +355,16 @@ Returns the parsed JSON response or nil."
 
 (cl-defmethod agent-shell-to-go-transport-send-text
     ((transport agent-shell-to-go-discord-transport)
-     channel
+     channel-id
      thread-id
      text
      &optional
      options)
-  "Post TEXT to Discord THREAD-ID (or CHANNEL if no thread).
+  "Post TEXT to Discord THREAD-ID (or CHANNEL-ID if no thread).
 Options plist supports :truncate."
   (let* ((truncate (map-elt options :truncate))
          ;; Thread channel IS the destination in Discord
-         (target (or thread-id channel))
+         (target (or thread-id channel-id))
          (display
           (if truncate
               (agent-shell-to-go--truncate-text text 500)
@@ -397,32 +378,33 @@ Options plist supports :truncate."
                  `((content . ,safe))))
                (msg-id (map-elt resp 'id)))
           (when (and was-truncated msg-id)
-            (agent-shell-to-go--save-truncated-message transport channel msg-id text))
+            (agent-shell-to-go--save-truncated-message
+             transport channel-id msg-id text))
           msg-id)
       (error
        (agent-shell-to-go--debug "discord send-text error: %s" err)
        nil))))
 
 (cl-defmethod agent-shell-to-go-transport-edit-message
-    ((transport agent-shell-to-go-discord-transport) channel message-id text)
-  "Edit MESSAGE-ID in Discord CHANNEL to TEXT."
+    ((transport agent-shell-to-go-discord-transport) channel-id message-id text)
+  "Edit MESSAGE-ID in Discord CHANNEL-ID to TEXT."
   (let* ((safe (agent-shell-to-go--discord-truncate-content text))
          (resp
           (agent-shell-to-go--discord-api
-           "PATCH" (format "/channels/%s/messages/%s" channel message-id)
+           "PATCH" (format "/channels/%s/messages/%s" channel-id message-id)
            `((content . ,safe)))))
     (map-elt resp 'id)))
 
 (cl-defmethod agent-shell-to-go-transport-upload-file
     ((transport agent-shell-to-go-discord-transport)
-     channel
+     channel-id
      thread-id
      path
      &optional
      comment)
-  "Upload PATH to Discord THREAD-ID (or CHANNEL) with optional COMMENT."
+  "Upload PATH to Discord THREAD-ID (or CHANNEL-ID) with optional COMMENT."
   (when (and path (file-exists-p path))
-    (agent-shell-to-go--discord-api-upload (or thread-id channel) path comment)))
+    (agent-shell-to-go--discord-api-upload (or thread-id channel-id) path comment)))
 
 (cl-defmethod agent-shell-to-go-transport-acknowledge-interaction
     ((transport agent-shell-to-go-discord-transport)
@@ -448,25 +430,25 @@ INTERACTION-TOKEN must be \"{interaction-id}:{token}\"."
                                       `((type . ,response-type))))))
 
 (cl-defmethod agent-shell-to-go-transport-get-message-text
-    ((transport agent-shell-to-go-discord-transport) channel message-id)
-  "Fetch the content of MESSAGE-ID from Discord CHANNEL."
+    ((transport agent-shell-to-go-discord-transport) channel-id message-id)
+  "Fetch the content of MESSAGE-ID from Discord CHANNEL-ID."
   (let* ((resp
           (agent-shell-to-go--discord-api
-           "GET" (format "/channels/%s/messages/%s" channel message-id))))
+           "GET" (format "/channels/%s/messages/%s" channel-id message-id))))
     (map-elt resp 'content)))
 
 (cl-defmethod agent-shell-to-go-transport-get-reactions
-    ((transport agent-shell-to-go-discord-transport) channel message-id)
-  "Return canonical action symbols for reactions on MESSAGE-ID.
-Discord does not provide a single endpoint for all reactions; returns nil.
-Reactions are handled in real-time via the Gateway."
+    ((transport agent-shell-to-go-discord-transport) channel-id message-id)
+  "Return canonical action symbols for reactions on MESSAGE-ID."
+  ;; Discord does not provide a single endpoint for all reactions; returns nil.
+  ;; Reactions are handled in real-time via the Gateway.
   nil)
 
 (cl-defmethod agent-shell-to-go-transport-fetch-thread-replies
-    ((transport agent-shell-to-go-discord-transport) channel thread-id)
+    ((transport agent-shell-to-go-discord-transport) channel-id thread-id)
   "Return reply plists (:msg-id :user :text) for THREAD-ID.
 In Discord the thread IS a channel, so THREAD-ID is the channel to query."
-  (let* ((target (or thread-id channel))
+  (let* ((target (or thread-id channel-id))
          (resp
           (agent-shell-to-go--discord-api
            "GET" (format "/channels/%s/messages?limit=100" target)))
@@ -482,22 +464,22 @@ In Discord the thread IS a channel, so THREAD-ID is the channel to query."
      (nreverse messages))))
 
 (cl-defmethod agent-shell-to-go-transport-start-thread
-    ((transport agent-shell-to-go-discord-transport) channel label)
-  "Create a forum post in the Discord forum CHANNEL. Return the post's thread channel ID.
-CHANNEL must be a forum channel (type 15); LABEL becomes the post title."
+    ((transport agent-shell-to-go-discord-transport) channel-id label)
+  "Create a forum post in the Discord forum CHANNEL-ID. Return the post's thread channel ID.
+CHANNEL-ID must be a forum channel; LABEL becomes the post title."
   (let* ((post-name
           (if (> (length label) 100)
               (concat (substring label 0 97) "…")
             label))
          (opening
-          (format "🤖 **Agent Shell Session** @ %s\n_%s_"
+          (format ":robot: **Agent Shell Session** @ %s\n_%s_"
                   (system-name)
                   (format-time-string "%Y-%m-%d %H:%M:%S")))
          ;; POST to the forum channel with an embedded `message' field —
          ;; this is the Discord forum-post creation endpoint.
          (resp
           (agent-shell-to-go--discord-api
-           "POST" (format "/channels/%s/threads" channel)
+           "POST" (format "/channels/%s/threads" channel-id)
            `((name . ,post-name)
              (auto_archive_duration . 10080)
              (message
@@ -508,12 +490,12 @@ CHANNEL must be a forum channel (type 15); LABEL becomes the post title."
     (when thread-id
       (puthash
        thread-id
-       channel
+       channel-id
        (agent-shell-to-go-discord-transport-thread-parents transport)))
     thread-id))
 
 (cl-defmethod agent-shell-to-go-transport-update-thread-header
-    ((transport agent-shell-to-go-discord-transport) channel thread-id title)
+    ((transport agent-shell-to-go-discord-transport) channel-id thread-id title)
   "Update the Discord forum post's title to TITLE."
   (when thread-id
     (let ((name
@@ -529,8 +511,8 @@ CHANNEL must be a forum channel (type 15); LABEL becomes the post title."
   (agent-shell-to-go--discord-get-or-create-project-channel transport project-path))
 
 (cl-defmethod agent-shell-to-go-transport-list-threads
-    ((transport agent-shell-to-go-discord-transport) channel)
-  "Return (:thread-id :last-timestamp) plists for forum posts in forum CHANNEL."
+    ((transport agent-shell-to-go-discord-transport) channel-id)
+  "Return (:thread-id :last-timestamp) plists for forum posts in forum CHANNEL-ID."
   (let (result)
     ;; Active threads via guild endpoint
     (when agent-shell-to-go-discord-guild-id
@@ -542,7 +524,7 @@ CHANNEL must be a forum channel (type 15); LABEL becomes the post title."
               (when resp
                 (append (map-elt resp 'threads) nil))))
         (dolist (thread threads)
-          (when (equal (map-elt thread 'parent_id) channel)
+          (when (equal (map-elt thread 'parent_id) channel-id)
             (let* ((tid (map-elt thread 'id))
                    ;; Derive approximate timestamp from Discord snowflake
                    (ts (/ (+ (ash (string-to-number tid) -22) 1420070400000) 1000.0)))
@@ -550,7 +532,8 @@ CHANNEL must be a forum channel (type 15); LABEL becomes the post title."
     ;; Archived public threads
     (let* ((resp
             (agent-shell-to-go--discord-api
-             "GET" (format "/channels/%s/threads/archived/public?limit=100" channel)))
+             "GET"
+             (format "/channels/%s/threads/archived/public?limit=100" channel-id)))
            (threads
             (when resp
               (append (map-elt resp 'threads) nil))))
@@ -561,13 +544,13 @@ CHANNEL must be a forum channel (type 15); LABEL becomes the post title."
     result))
 
 (cl-defmethod agent-shell-to-go-transport-delete-message
-    ((transport agent-shell-to-go-discord-transport) channel message-id)
-  "Delete MESSAGE-ID from Discord CHANNEL."
+    ((transport agent-shell-to-go-discord-transport) channel-id message-id)
+  "Delete MESSAGE-ID from Discord CHANNEL-ID."
   (agent-shell-to-go--discord-api
-   "DELETE" (format "/channels/%s/messages/%s" channel message-id)))
+   "DELETE" (format "/channels/%s/messages/%s" channel-id message-id)))
 
 (cl-defmethod agent-shell-to-go-transport-delete-thread
-    ((transport agent-shell-to-go-discord-transport) channel thread-id)
+    ((transport agent-shell-to-go-discord-transport) channel-id thread-id)
   "Delete the Discord forum post THREAD-ID (deletes its thread channel)."
   (when thread-id
     (agent-shell-to-go--discord-api "DELETE" (format "/channels/%s" thread-id))))
@@ -576,15 +559,15 @@ CHANNEL must be a forum channel (type 15); LABEL becomes the post title."
 
 (cl-defmethod agent-shell-to-go-transport-format-tool-call-start
     ((transport agent-shell-to-go-discord-transport) title)
-  (format "⏳ `%s`" title))
+  (format ":hourglass: `%s`" title))
 
 (cl-defmethod agent-shell-to-go-transport-format-tool-call-result
     ((transport agent-shell-to-go-discord-transport) title status output)
   (let ((icon
          (pcase status
-           ('completed "✅")
-           ('failed "❌")
-           (_ "🔧"))))
+           ('completed ":white_check_mark:")
+           ('failed ":x:")
+           (_ ":tools:"))))
     (if (and output (stringp output) (not (string-empty-p output)))
         (format "%s `%s`\n```\n%s\n```" icon title output)
       (format "%s `%s`" icon title))))
@@ -598,17 +581,17 @@ CHANNEL must be a forum channel (type 15); LABEL becomes the post title."
 
 (cl-defmethod agent-shell-to-go-transport-format-user-message
     ((transport agent-shell-to-go-discord-transport) text)
-  (format "👤 **User**\n%s" text))
+  (format ":bust_in_silhouette: **User**\n%s" text))
 
 (cl-defmethod agent-shell-to-go-transport-format-agent-message
     ((transport agent-shell-to-go-discord-transport) text)
-  (format "🤖 **Agent**\n%s" text))
+  (format ":robot: **Agent**\n%s" text))
 
 (cl-defmethod agent-shell-to-go-transport-format-markdown
     ((transport agent-shell-to-go-discord-transport) markdown)
   markdown)
 
-; WebSocket / Gateway
+; WebSocket / Gateway 
 
 (defun agent-shell-to-go--discord-stop-heartbeat (transport)
   "Cancel the heartbeat timer for TRANSPORT."
@@ -650,9 +633,7 @@ CHANNEL must be a forum channel (type 15); LABEL becomes the post title."
                agent-shell-to-go--discord-intent-guild-messages
                agent-shell-to-go--discord-intent-guild-message-reactions
                agent-shell-to-go--discord-intent-direct-messages
-               (if agent-shell-to-go-discord-message-content-intent
-                   agent-shell-to-go--discord-intent-message-content
-                 0)))
+               agent-shell-to-go--discord-intent-message-content))
              (payload
               `((op . ,agent-shell-to-go--discord-op-identify)
                 (d
@@ -703,7 +684,7 @@ CHANNEL must be a forum channel (type 15); LABEL becomes the post title."
                        (format "%s" t-event)
                        d)))))))
 
-; Event dispatch
+; Event dispatch 
 
 (defun agent-shell-to-go--discord-message-seen-p (transport msg-id)
   "Return non-nil if MSG-ID was already processed by TRANSPORT."
@@ -856,7 +837,7 @@ ADDED-P is t for MESSAGE_REACTION_ADD, nil for MESSAGE_REACTION_REMOVE."
                   :user user-id
                   :interaction-token combined-token)))))))
 
-; Application Command registration
+; Application Command registration 
 
 ;;;###autoload
 (defun agent-shell-to-go-discord-register-commands (&optional guild-id)
@@ -896,12 +877,13 @@ Must be called once after initial bot setup or command changes."
              (description . "List active agent-shell projects")
              (type . 1))]))
     (agent-shell-to-go--discord-api "PUT" endpoint commands)
-    (agent-shell-to-go--debug "Discord commands registered (%s)"
-             (if gid
-                 "guild-scoped"
-               "global"))))
+    (agent-shell-to-go--debug
+     "Discord commands registered (%s)"
+     (if gid
+         "guild-scoped"
+       "global"))))
 
-; Registration
+; Registration 
 
 (defvar agent-shell-to-go--discord-instance nil
   "The singleton Discord transport struct.")

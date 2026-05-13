@@ -146,14 +146,14 @@
   (let ((tr (agent-shell-to-go-test-discord--make)))
     (let ((s (agent-shell-to-go-transport-format-tool-call-start tr "read_file")))
       (should (string-match-p "read_file" s))
-      (should (string-match-p "⏳" s)))))
+      (should (string-match-p ":hourglass:" s)))))
 
 (ert-deftest agent-shell-to-go-test-discord-format-tool-call-result-completed ()
   "Completed tool call result uses checkmark."
   (let ((tr (agent-shell-to-go-test-discord--make)))
     (let ((s (agent-shell-to-go-transport-format-tool-call-result
               tr "bash" 'completed "output here")))
-      (should (string-match-p "✅" s))
+      (should (string-match-p ":white_check_mark:" s))
       (should (string-match-p "bash" s))
       (should (string-match-p "output here" s)))))
 
@@ -162,7 +162,7 @@
   (let ((tr (agent-shell-to-go-test-discord--make)))
     (let ((s (agent-shell-to-go-transport-format-tool-call-result
               tr "bash" 'failed "error msg")))
-      (should (string-match-p "❌" s))
+      (should (string-match-p ":x:" s))
       (should (string-match-p "error msg" s)))))
 
 (ert-deftest agent-shell-to-go-test-discord-format-tool-call-result-no-output ()
@@ -177,14 +177,14 @@
   "User message format includes the person emoji and text."
   (let ((tr (agent-shell-to-go-test-discord--make)))
     (let ((s (agent-shell-to-go-transport-format-user-message tr "hello there")))
-      (should (string-match-p "👤" s))
+      (should (string-match-p ":bust_in_silhouette:" s))
       (should (string-match-p "hello there" s)))))
 
 (ert-deftest agent-shell-to-go-test-discord-format-agent-message ()
   "Agent message format includes the robot emoji and text."
   (let ((tr (agent-shell-to-go-test-discord--make)))
     (let ((s (agent-shell-to-go-transport-format-agent-message tr "I am a robot")))
-      (should (string-match-p "🤖" s))
+      (should (string-match-p ":robot:" s))
       (should (string-match-p "I am a robot" s)))))
 
 (ert-deftest agent-shell-to-go-test-discord-format-markdown-passthrough ()
