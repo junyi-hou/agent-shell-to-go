@@ -108,23 +108,23 @@ Default is 7 days."
 (defconst agent-shell-to-go--debug-buffer-name "*agent-shell-to-go-debug*"
   "Name of the buffer used for debug logging.")
 
-(defun agent-shell-to-go--debug (format-string &rest args)
+(defmacro agent-shell-to-go--debug (format-string &rest args)
   "Append a timestamped debug line to `agent-shell-to-go--debug-buffer-name'.
-Does nothing when `agent-shell-to-go-debug' is nil."
-  (when agent-shell-to-go-debug
-    (let* ((msg (apply #'format format-string args))
-           (line (format "[%s] %s\n" (format-time-string "%H:%M:%S") msg))
-           (buf (get-buffer-create agent-shell-to-go--debug-buffer-name)))
-      (with-current-buffer buf
-        (goto-char (point-max))
-        (insert line)
-        (let ((excess
-               (- (count-lines (point-min) (point-max))
-                  agent-shell-to-go-event-log-max-entries)))
-          (when (> excess 0)
-            (goto-char (point-min))
-            (forward-line excess)
-            (delete-region (point-min) (point))))))))
+Does nothing when `agent-shell-to-go-debug' is nil; arguments are not evaluated."
+  `(when agent-shell-to-go-debug
+     (let* ((msg (format ,format-string ,@args))
+            (line (format "[%s] %s\n" (format-time-string "%H:%M:%S") msg))
+            (buf (get-buffer-create agent-shell-to-go--debug-buffer-name)))
+       (with-current-buffer buf
+         (goto-char (point-max))
+         (insert line)
+         (let ((excess
+                (- (count-lines (point-min) (point-max))
+                   agent-shell-to-go-event-log-max-entries)))
+           (when (> excess 0)
+             (goto-char (point-min))
+             (forward-line excess)
+             (delete-region (point-min) (point))))))))
 
 (defun agent-shell-to-go--strip-non-ascii (text)
   "Strip non-ASCII characters from TEXT, replacing them with `?'."
@@ -369,6 +369,10 @@ Plist argument:
 ;; transport sends.  Splitting removes the need for expand reactions and handles
 ;; agent messages (currently not truncated), which can also exceed transport limits
 ;; (Discord: 2000 chars, Slack: 4000 chars).
+;; TODO: Add a per-transport send queue to handle rate limits.  All send/edit calls
+;; should be serialized through a timer-driven queue (one queue per transport instance)
+;; so bursts don't trigger 429s.  On a 429, read Retry-After and reschedule.
+;; Slack: ~1 msg/sec per channel; Discord: 5 requests/5 sec globally.
 
 (defconst agent-shell-to-go--max-message-length 3800
   "Maximum body length for a transport message (with buffer for extra markup).")
