@@ -762,9 +762,9 @@ Options plist supports :truncate :ephemeral :user-id :interaction-token."
     (agent-shell-to-go--debug "slack ws type: %s" type)
     (pcase type
       ("events_api" (let ((ep (map-elt data 'payload)))
-         (run-at-time 0 nil #'agent-shell-to-go--slack-dispatch-event transport ep)))
+         (agent-shell-to-go--defer #'agent-shell-to-go--slack-dispatch-event transport ep)))
       ("slash_commands" (let ((sp (map-elt data 'payload)))
-         (run-at-time 0 nil #'agent-shell-to-go--slack-dispatch-slash transport sp)))
+         (agent-shell-to-go--defer #'agent-shell-to-go--slack-dispatch-slash transport sp)))
       ("hello" (agent-shell-to-go--debug "slack ws: connected"))
       ("disconnect"
        (agent-shell-to-go--debug "slack ws: disconnect requested, reconnecting")

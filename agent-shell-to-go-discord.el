@@ -679,10 +679,10 @@ CHANNEL-ID must be a forum channel; LABEL becomes the post title."
            "discord gateway: invalid session, re-identifying in 5s")
           (run-with-timer 5 nil #'agent-shell-to-go--discord-send-identify transport))
          ((= op agent-shell-to-go--discord-op-dispatch)
-          (run-at-time 0 nil #'agent-shell-to-go--discord-dispatch-event
-                       transport
-                       (format "%s" t-event)
-                       d)))))))
+          (agent-shell-to-go--defer #'agent-shell-to-go--discord-dispatch-event
+                                    transport
+                                    (format "%s" t-event)
+                                    d)))))))
 
 ; Event dispatch 
 

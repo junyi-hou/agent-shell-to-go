@@ -590,6 +590,10 @@ Closes any existing socket first."
   (let ((sock (and ws (agent-shell-to-go--ws-websocket ws))))
     (and sock (websocket-openp sock))))
 
+(defun agent-shell-to-go--defer (fn &rest args)
+  "Schedule FN with ARGS to run on the next event loop iteration."
+  (apply #'run-at-time 0 nil fn args))
+
 ; Slash command arg schemas 
 
 (defconst agent-shell-to-go--slash-command-schemas
