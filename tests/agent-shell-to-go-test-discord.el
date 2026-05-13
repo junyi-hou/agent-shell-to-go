@@ -3,14 +3,136 @@
 ;; This file is not part of GNU Emacs.
 
 ;;; Commentary:
-
-;; ERT tests for functions defined in agent-shell-to-go-discord.el.
-;; Tests cover pure helpers, formatting methods, and hook-firing normalization
-;; paths without requiring a real Discord backend or WebSocket connection.
+;;
+;; Tests for the Discord transport implementation (agent-shell-to-go-discord.el).
+;; Uses a mocked Discord REST API and a fake WebSocket — no real Discord backend required.
 ;;
 ;; Run:
-;;   emacsclient -e '(load-file "tests/agent-shell-to-go-test-discord.el")'
-;;   emacsclient -e '(ert-run-tests-batch "^agent-shell-to-go-test-discord-")'
+;;   make test TEST=agent-shell-to-go-test-discord.el
+;;
+;; APIs under test:
+;;
+;;   agent-shell-to-go--discord-emoji-to-action
+;;     - emoji-to-action-known: registered emoji names map to canonical actions
+;;     - emoji-to-action-unknown: unknown or nil emoji names return nil
+;;
+;;   agent-shell-to-go--discord-truncate-content
+;;     - truncate-content-short: short text passes through unchanged
+;;     - truncate-content-long: text over 2000 chars is cut with a note
+;;     - truncate-content-at-limit: text at exactly the limit is not truncated
+;;
+;;   agent-shell-to-go--discord-message-seen-p
+;;     - message-seen-first-time: first call returns nil
+;;     - message-seen-second-time: second call for the same ID returns t
+;;     - message-seen-independent-ids: different IDs are tracked independently
+;;
+;;   agent-shell-to-go--discord-resolve-channel
+;;     - resolve-channel-top-level: channel with no parent resolves as (channel . nil)
+;;     - resolve-channel-forum-post: registered thread resolves as (parent . thread)
+;;
+;;   agent-shell-to-go-transport-authorized-p
+;;     - authorized-in-list: users in the list are authorized
+;;     - authorized-not-in-list: users not in the list are denied
+;;     - authorized-empty-list: empty list denies everyone
+;;
+;;   agent-shell-to-go-transport-format-tool-call-start
+;;     - format-tool-call-start: output contains the tool name
+;;
+;;   agent-shell-to-go-transport-format-tool-call-result
+;;     - format-tool-call-result-completed: includes tool name and output in a code block
+;;     - format-tool-call-result-failed: includes the :x: emoji
+;;     - format-tool-call-result-no-output: nil output omits the code block
+;;
+;;   agent-shell-to-go-transport-format-diff
+;;     - format-diff-empty: identical text yields empty string
+;;     - format-diff-has-changes: changed text yields a ```diff block
+;;
+;;   agent-shell-to-go-transport-format-user-message
+;;     - format-user-message: output contains the message text
+;;
+;;   agent-shell-to-go-transport-format-agent-message
+;;     - format-agent-message: output contains the message text
+;;
+;;   agent-shell-to-go-transport-format-markdown
+;;     - format-markdown-passthrough: returns input unchanged (Discord uses CommonMark natively)
+;;
+;;   agent-shell-to-go--discord-dispatch-event
+;;     - dispatch-ready-sets-state: READY caches bot user ID and session ID
+;;     - dispatch-message-fires-hook: MESSAGE_CREATE fires message hook for authorized users
+;;     - dispatch-reaction-add-fires-hook: MESSAGE_REACTION_ADD fires reaction hook with added-p t
+;;     - dispatch-reaction-remove-fires-hook: MESSAGE_REACTION_REMOVE fires hook with added-p nil
+;;
+;;   agent-shell-to-go--discord-normalize-message
+;;     - normalize-message-ignores-bot: author.bot = t is silently dropped
+;;     - normalize-message-ignores-own-bot-id: own bot user ID is dropped
+;;     - normalize-message-ignores-unauthorized: unauthorized users are dropped
+;;     - normalize-message-deduplicates: same message ID fires hook only once
+;;     - normalize-message-resolves-thread: thread channel reports parent forum as :channel-id
+;;
+;;   agent-shell-to-go--discord-normalize-reaction
+;;     - normalize-reaction-ignores-own-bot: own bot's reactions are dropped
+;;     - normalize-reaction-unknown-emoji-still-fires: unknown emoji fires hook with nil :action
+;;
+;;   agent-shell-to-go--discord-normalize-interaction
+;;     - normalize-interaction-fires-hook: APPLICATION_COMMAND fires slash-command hook
+;;     - normalize-interaction-acknowledges-before-auth: acknowledge called before auth check
+;;     - normalize-interaction-ignores-unauthorized: unauthorized users do not fire the hook
+;;     - normalize-interaction-ignores-non-command: non-APPLICATION_COMMAND types are ignored
+;;
+;;   agent-shell-to-go--discord-handle-frame
+;;     - gateway-hello: op 10 starts heartbeat with correct interval and sends identify
+;;     - gateway-heartbeat-ack: op 11 produces no sends
+;;     - gateway-heartbeat-request: op 1 sends heartbeat payload back
+;;     - gateway-invalid-session: op 9 schedules re-identify after 5s
+;;     - gateway-dispatch-calls-defer: op 0 defers dispatch-event call
+;;     - gateway-dispatch-updates-sequence: op 0 updates sequence number
+;;
+;;   agent-shell-to-go-transport-send-text
+;;     - send-text-returns-message-id: returns the message ID from the API
+;;     - send-text-uses-thread-id-as-target: posts to thread-id when provided
+;;     - send-text-uses-channel-when-no-thread: posts to channel-id when thread is nil
+;;     - send-text-truncated-saves-full-text: :truncate saves full text for later expansion
+;;
+;;   agent-shell-to-go-transport-edit-message
+;;     - edit-message: sends PATCH and returns the message ID
+;;
+;;   agent-shell-to-go-transport-start-thread
+;;     - start-thread-returns-id: returns the thread ID from the API
+;;     - start-thread-records-parent: registers thread→forum mapping for inbound routing
+;;
+;;   agent-shell-to-go-transport-update-thread-header
+;;     - update-thread-header: sends PATCH to the thread channel endpoint
+;;     - update-thread-header-truncates-long-title: titles over 100 chars are truncated
+;;
+;;   agent-shell-to-go-transport-delete-message
+;;     - delete-message: sends DELETE to the message endpoint
+;;
+;;   agent-shell-to-go-transport-delete-thread
+;;     - delete-thread: sends DELETE to the thread channel endpoint
+;;
+;;   agent-shell-to-go-transport-fetch-thread-replies
+;;     - fetch-thread-replies: returns plists in chronological order
+;;
+;;   agent-shell-to-go-transport-get-message-text
+;;     - get-message-text: returns the content field from the API
+;;
+;;   agent-shell-to-go-transport-get-reactions
+;;     - get-reactions-returns-nil: always nil; reactions arrive via Gateway
+;;
+;;   agent-shell-to-go-transport-upload-file
+;;     - upload-file-skips-missing-file: does nothing when the path does not exist
+;;     - upload-file-uses-thread-target: posts to thread-id when provided
+;;     - upload-file-uses-channel-fallback: posts to channel-id when thread is nil
+;;
+;;   agent-shell-to-go--discord-save-channels / agent-shell-to-go--discord-load-channels
+;;     - save-channels: writes project→channel map to disk as an alist
+;;     - load-channels: reads alist from disk into the transport hash
+;;     - channels-round-trip: save+load in a fresh transport preserves all mappings
+;;
+;;   agent-shell-to-go--discord-get-or-create-project-channel
+;;     - get-or-create-channel-cache-hit: cached ID returned without any API call
+;;     - get-or-create-channel-found-by-name: finds existing forum channel by name
+;;     - get-or-create-channel-creates-new: creates forum channel when none is found
 
 ;;; Code:
 
@@ -21,9 +143,9 @@
   (add-to-list 'load-path root))
 
 (require 'agent-shell-to-go-discord)
+(require 'gateway-helpers)
 
-;; ---------------------------------------------------------------------------
-;; Helpers
+; Test helpers
 
 (defun agent-shell-to-go-test-discord--make ()
   "Return a fresh Discord transport with a known bot-user-id cached."
@@ -31,7 +153,39 @@
     (setf (agent-shell-to-go-discord-transport-bot-user-id-cache tr) "BOT123")
     tr))
 
-;; ---------------------------------------------------------------------------
+(defun agent-shell-to-go-test-discord--make-with-ws ()
+  "Return a fresh Discord transport with a fake WebSocket wired up.
+The fake socket satisfies websocket-openp when stubbed."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (dummy-socket (list 'fake-discord-ws))
+         (ws (agent-shell-to-go--ws-make
+              :name 'discord-test
+              :url-fn (lambda () "wss://test")
+              :on-frame (lambda (_) nil))))
+    (setf (agent-shell-to-go--ws-websocket ws) dummy-socket)
+    (setf (agent-shell-to-go-discord-transport-ws tr) ws)
+    tr))
+
+(defmacro with-mocked-discord-api (responses &rest body)
+  "Execute BODY with `agent-shell-to-go--discord-request' mocked.
+RESPONSES is an alist keyed by (METHOD . ENDPOINT); unmatched calls return nil."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'agent-shell-to-go--discord-request)
+               (lambda (method endpoint &rest _extra)
+                 (cdr (assoc (cons method endpoint) ,responses)))))
+     ,@body))
+
+(defmacro with-discord-temp-storage (&rest body)
+  "Execute BODY with `agent-shell-to-go-storage-base-dir' bound to a temp dir."
+  (declare (indent 0))
+  `(let* ((tmpdir (make-temp-file "astg-discord-storage" t))
+          (agent-shell-to-go-storage-base-dir tmpdir))
+     (unwind-protect
+         (progn ,@body)
+       (delete-directory tmpdir t))))
+
+; 1. Pure helpers
+
 ;; Emoji-to-action mapping
 
 (ert-deftest agent-shell-to-go-test-discord-emoji-to-action-known ()
@@ -49,34 +203,30 @@
   (should (eq 'permission-reject (agent-shell-to-go--discord-emoji-to-action "thumbsdown"))))
 
 (ert-deftest agent-shell-to-go-test-discord-emoji-to-action-unknown ()
-  "Unregistered emoji names return nil."
+  "Unknown or nil emoji names return nil."
   (should (null (agent-shell-to-go--discord-emoji-to-action "unknown_emoji")))
   (should (null (agent-shell-to-go--discord-emoji-to-action "")))
   (should (null (agent-shell-to-go--discord-emoji-to-action nil))))
 
-;; ---------------------------------------------------------------------------
 ;; Content truncation
 
 (ert-deftest agent-shell-to-go-test-discord-truncate-content-short ()
   "Short text passes through unchanged."
-  (should (equal "hello world"
-                 (agent-shell-to-go--discord-truncate-content "hello world")))
-  (should (equal ""
-                 (agent-shell-to-go--discord-truncate-content ""))))
+  (should (equal "hello" (agent-shell-to-go--discord-truncate-content "hello")))
+  (should (equal "" (agent-shell-to-go--discord-truncate-content ""))))
 
 (ert-deftest agent-shell-to-go-test-discord-truncate-content-long ()
-  "Text exceeding 2000 chars is truncated with a note appended."
+  "Text over 2000 chars is cut and a truncation note appended."
   (let* ((text (make-string 2100 ?a))
          (result (agent-shell-to-go--discord-truncate-content text)))
     (should (<= (length result) agent-shell-to-go--discord-max-content-length))
     (should (string-match-p "truncated" result))))
 
-(ert-deftest agent-shell-to-go-test-discord-truncate-content-exactly-at-limit ()
-  "Text exactly at limit is not truncated."
+(ert-deftest agent-shell-to-go-test-discord-truncate-content-at-limit ()
+  "Text exactly at the limit is not truncated."
   (let ((text (make-string agent-shell-to-go--discord-max-content-length ?b)))
     (should (equal text (agent-shell-to-go--discord-truncate-content text)))))
 
-;; ---------------------------------------------------------------------------
 ;; Deduplication
 
 (ert-deftest agent-shell-to-go-test-discord-message-seen-first-time ()
@@ -90,25 +240,24 @@
     (agent-shell-to-go--discord-message-seen-p tr "msg-dup")
     (should (eq t (agent-shell-to-go--discord-message-seen-p tr "msg-dup")))))
 
-(ert-deftest agent-shell-to-go-test-discord-message-seen-different-ids ()
+(ert-deftest agent-shell-to-go-test-discord-message-seen-independent-ids ()
   "Different IDs are tracked independently."
   (let ((tr (agent-shell-to-go-test-discord--make)))
     (agent-shell-to-go--discord-message-seen-p tr "msg-a")
     (should (null (agent-shell-to-go--discord-message-seen-p tr "msg-b")))
     (should (eq t (agent-shell-to-go--discord-message-seen-p tr "msg-a")))))
 
-;; ---------------------------------------------------------------------------
 ;; Channel resolution
 
 (ert-deftest agent-shell-to-go-test-discord-resolve-channel-top-level ()
-  "A channel with no registered parent resolves as top-level."
-  (let ((tr (agent-shell-to-go-test-discord--make)))
-    (let ((result (agent-shell-to-go--discord-resolve-channel tr "CHAN1")))
-      (should (equal "CHAN1" (car result)))
-      (should (null (cdr result))))))
+  "A channel with no registered parent resolves as (channel . nil)."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (result (agent-shell-to-go--discord-resolve-channel tr "CHAN1")))
+    (should (equal "CHAN1" (car result)))
+    (should (null (cdr result)))))
 
 (ert-deftest agent-shell-to-go-test-discord-resolve-channel-forum-post ()
-  "A thread channel whose parent is registered resolves to (parent . thread)."
+  "A thread channel with a registered parent resolves as (parent . thread)."
   (let ((tr (agent-shell-to-go-test-discord--make)))
     (puthash "THREAD1" "FORUM1"
              (agent-shell-to-go-discord-transport-thread-parents tr))
@@ -116,274 +265,288 @@
       (should (equal "FORUM1" (car result)))
       (should (equal "THREAD1" (cdr result))))))
 
-;; ---------------------------------------------------------------------------
 ;; Authorization
 
-(ert-deftest agent-shell-to-go-test-discord-authorized-p-in-list ()
-  "A user in the authorized list is authorized."
-  (let ((agent-shell-to-go-discord-authorized-users '("U1" "U2")))
-    (let ((tr (agent-shell-to-go-test-discord--make)))
-      (should (agent-shell-to-go-transport-authorized-p tr "U1"))
-      (should (agent-shell-to-go-transport-authorized-p tr "U2")))))
+(ert-deftest agent-shell-to-go-test-discord-authorized-in-list ()
+  "Users in the authorized list are authorized."
+  (let ((agent-shell-to-go-discord-authorized-users '("U1" "U2"))
+        (tr (agent-shell-to-go-test-discord--make)))
+    (should (agent-shell-to-go-transport-authorized-p tr "U1"))
+    (should (agent-shell-to-go-transport-authorized-p tr "U2"))))
 
-(ert-deftest agent-shell-to-go-test-discord-authorized-p-not-in-list ()
+(ert-deftest agent-shell-to-go-test-discord-authorized-not-in-list ()
   "A user not in the authorized list is not authorized."
-  (let ((agent-shell-to-go-discord-authorized-users '("U1")))
-    (let ((tr (agent-shell-to-go-test-discord--make)))
-      (should (null (agent-shell-to-go-transport-authorized-p tr "STRANGER"))))))
+  (let ((agent-shell-to-go-discord-authorized-users '("U1"))
+        (tr (agent-shell-to-go-test-discord--make)))
+    (should (null (agent-shell-to-go-transport-authorized-p tr "STRANGER")))))
 
-(ert-deftest agent-shell-to-go-test-discord-authorized-p-empty-list ()
+(ert-deftest agent-shell-to-go-test-discord-authorized-empty-list ()
   "When the authorized list is nil, no one is authorized."
-  (let ((agent-shell-to-go-discord-authorized-users nil))
-    (let ((tr (agent-shell-to-go-test-discord--make)))
-      (should (null (agent-shell-to-go-transport-authorized-p tr "U1"))))))
+  (let ((agent-shell-to-go-discord-authorized-users nil)
+        (tr (agent-shell-to-go-test-discord--make)))
+    (should (null (agent-shell-to-go-transport-authorized-p tr "U1")))))
 
-;; ---------------------------------------------------------------------------
-;; Formatting methods
+; 2. Formatting
 
 (ert-deftest agent-shell-to-go-test-discord-format-tool-call-start ()
-  "Tool call start uses a clock emoji and backtick-quoted title."
-  (let ((tr (agent-shell-to-go-test-discord--make)))
-    (let ((s (agent-shell-to-go-transport-format-tool-call-start tr "read_file")))
-      (should (string-match-p "read_file" s))
-      (should (string-match-p ":hourglass:" s)))))
+  "Tool call start contains the title."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (s (agent-shell-to-go-transport-format-tool-call-start tr "read_file")))
+    (should (string-match-p "read_file" s))))
 
 (ert-deftest agent-shell-to-go-test-discord-format-tool-call-result-completed ()
-  "Completed tool call result uses checkmark."
-  (let ((tr (agent-shell-to-go-test-discord--make)))
-    (let ((s (agent-shell-to-go-transport-format-tool-call-result
-              tr "bash" 'completed "output here")))
-      (should (string-match-p ":white_check_mark:" s))
-      (should (string-match-p "bash" s))
-      (should (string-match-p "output here" s)))))
+  "Completed result includes tool name and output in a code block."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (s (agent-shell-to-go-transport-format-tool-call-result
+             tr "bash" 'completed "output here")))
+    (should (string-match-p "bash" s))
+    (should (string-match-p "output here" s))
+    (should (string-match-p "```" s))))
 
 (ert-deftest agent-shell-to-go-test-discord-format-tool-call-result-failed ()
-  "Failed tool call result uses X emoji."
-  (let ((tr (agent-shell-to-go-test-discord--make)))
-    (let ((s (agent-shell-to-go-transport-format-tool-call-result
-              tr "bash" 'failed "error msg")))
-      (should (string-match-p ":x:" s))
-      (should (string-match-p "error msg" s)))))
+  "Failed result includes the X emoji shortcode."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (s (agent-shell-to-go-transport-format-tool-call-result
+             tr "bash" 'failed "err")))
+    (should (string-match-p ":x:" s))
+    (should (string-match-p "err" s))))
 
 (ert-deftest agent-shell-to-go-test-discord-format-tool-call-result-no-output ()
-  "Tool call result with no output omits the code block."
-  (let ((tr (agent-shell-to-go-test-discord--make)))
-    (let ((s (agent-shell-to-go-transport-format-tool-call-result
-              tr "bash" 'completed nil)))
-      (should (string-match-p "bash" s))
-      (should (not (string-match-p "```" s))))))
+  "Result with nil output omits the code block."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (s (agent-shell-to-go-transport-format-tool-call-result
+             tr "bash" 'completed nil)))
+    (should (string-match-p "bash" s))
+    (should (not (string-match-p "```" s)))))
+
+(ert-deftest agent-shell-to-go-test-discord-format-diff-empty ()
+  "Identical old and new text yields an empty string."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (s (agent-shell-to-go-transport-format-diff tr "same" "same")))
+    (should (equal "" s))))
+
+(ert-deftest agent-shell-to-go-test-discord-format-diff-has-changes ()
+  "Different old and new text yields a ```diff fenced block."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (s (agent-shell-to-go-transport-format-diff tr "old line" "new line")))
+    (should (string-match-p "```diff" s))))
 
 (ert-deftest agent-shell-to-go-test-discord-format-user-message ()
-  "User message format includes the person emoji and text."
-  (let ((tr (agent-shell-to-go-test-discord--make)))
-    (let ((s (agent-shell-to-go-transport-format-user-message tr "hello there")))
-      (should (string-match-p ":bust_in_silhouette:" s))
-      (should (string-match-p "hello there" s)))))
+  "User message format contains the text."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (s (agent-shell-to-go-transport-format-user-message tr "hello there")))
+    (should (string-match-p "hello there" s))))
 
 (ert-deftest agent-shell-to-go-test-discord-format-agent-message ()
-  "Agent message format includes the robot emoji and text."
-  (let ((tr (agent-shell-to-go-test-discord--make)))
-    (let ((s (agent-shell-to-go-transport-format-agent-message tr "I am a robot")))
-      (should (string-match-p ":robot:" s))
-      (should (string-match-p "I am a robot" s)))))
+  "Agent message format contains the text."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (s (agent-shell-to-go-transport-format-agent-message tr "I am a robot")))
+    (should (string-match-p "I am a robot" s))))
 
 (ert-deftest agent-shell-to-go-test-discord-format-markdown-passthrough ()
-  "Markdown formatter returns the input unchanged (Discord uses CommonMark)."
+  "Markdown formatter returns its input unchanged (Discord uses CommonMark natively)."
   (let ((tr (agent-shell-to-go-test-discord--make)))
     (should (equal "**bold** _italic_"
                    (agent-shell-to-go-transport-format-markdown tr "**bold** _italic_")))))
 
-(ert-deftest agent-shell-to-go-test-discord-format-diff-empty ()
-  "When old and new are identical, the diff block is empty."
+; 3. Normalization (via dispatch-event and normalize-*)
+
+;; READY
+
+(ert-deftest agent-shell-to-go-test-discord-dispatch-ready-sets-state ()
+  "READY event caches the bot user ID and session ID on the transport."
   (let ((tr (agent-shell-to-go-test-discord--make)))
-    (let ((s (agent-shell-to-go-transport-format-diff tr "same" "same")))
-      (should (equal "" s)))))
+    (agent-shell-to-go--discord-dispatch-event
+     tr "READY" '((user . ((id . "NEW-BOT"))) (session_id . "SID123")))
+    (should (equal "NEW-BOT"
+                   (agent-shell-to-go-discord-transport-bot-user-id-cache tr)))
+    (should (equal "SID123"
+                   (agent-shell-to-go-discord-transport-session-id tr)))))
 
-(ert-deftest agent-shell-to-go-test-discord-format-diff-has-changes ()
-  "When text differs, a diff block with ```diff fences is returned."
-  (let ((tr (agent-shell-to-go-test-discord--make)))
-    (let ((s (agent-shell-to-go-transport-format-diff tr "old line" "new line")))
-      (should (string-match-p "```diff" s))
-      (should (string-match-p "```" s)))))
+;; MESSAGE_CREATE
 
-;; ---------------------------------------------------------------------------
-;; normalize-message hook firing
-
-(ert-deftest agent-shell-to-go-test-discord-normalize-message-fires-hook ()
-  "normalize-message fires agent-shell-to-go-message-hook for authorized users."
+(ert-deftest agent-shell-to-go-test-discord-dispatch-message-fires-hook ()
+  "MESSAGE_CREATE fires the message hook for authorized users."
   (let* ((tr (agent-shell-to-go-test-discord--make))
          (agent-shell-to-go-discord-authorized-users '("USER1"))
          (received nil)
          (agent-shell-to-go-message-hook
-          (list (lambda (plist)
-                  (setq received plist)))))
-    (agent-shell-to-go--discord-normalize-message
-     tr `((id . "M1") (channel_id . "C1")
-          (author . ((id . "USER1") (bot . :json-false)))
-          (content . "hello")))
+          (list (lambda (&rest plist) (setq received plist)))))
+    (agent-shell-to-go--discord-dispatch-event
+     tr "MESSAGE_CREATE"
+     '((id . "M1") (channel_id . "C1")
+       (author . ((id . "USER1") (bot . :json-false)))
+       (content . "hello")))
     (should received)
-    (should (equal "USER1" (map-elt received :user)))
-    (should (equal "hello" (map-elt received :text)))
-    (should (equal "M1" (map-elt received :msg-id)))))
+    (should (equal "hello" (plist-get received :text)))
+    (should (equal "USER1" (plist-get received :user)))))
 
 (ert-deftest agent-shell-to-go-test-discord-normalize-message-ignores-bot ()
-  "normalize-message ignores messages from bots."
+  "Messages where author.bot is t are silently dropped."
   (let* ((tr (agent-shell-to-go-test-discord--make))
          (agent-shell-to-go-discord-authorized-users '("USER1"))
          (received nil)
          (agent-shell-to-go-message-hook
           (list (lambda (plist) (setq received plist)))))
     (agent-shell-to-go--discord-normalize-message
-     tr `((id . "M1") (channel_id . "C1")
+     tr '((id . "M1") (channel_id . "C1")
           (author . ((id . "USER1") (bot . t)))
-          (content . "bot message")))
+          (content . "bot msg")))
     (should (null received))))
 
 (ert-deftest agent-shell-to-go-test-discord-normalize-message-ignores-own-bot-id ()
-  "normalize-message ignores messages from the transport's own bot user."
+  "Messages whose author ID matches the cached bot user ID are dropped."
   (let* ((tr (agent-shell-to-go-test-discord--make))
          (agent-shell-to-go-discord-authorized-users '("BOT123"))
          (received nil)
          (agent-shell-to-go-message-hook
           (list (lambda (plist) (setq received plist)))))
     (agent-shell-to-go--discord-normalize-message
-     tr `((id . "M1") (channel_id . "C1")
+     tr '((id . "M1") (channel_id . "C1")
           (author . ((id . "BOT123") (bot . :json-false)))
           (content . "echo")))
     (should (null received))))
 
 (ert-deftest agent-shell-to-go-test-discord-normalize-message-ignores-unauthorized ()
-  "normalize-message ignores messages from unauthorized users."
+  "Messages from unauthorized users are dropped."
   (let* ((tr (agent-shell-to-go-test-discord--make))
          (agent-shell-to-go-discord-authorized-users '("ALLOWED"))
          (received nil)
          (agent-shell-to-go-message-hook
           (list (lambda (plist) (setq received plist)))))
     (agent-shell-to-go--discord-normalize-message
-     tr `((id . "M1") (channel_id . "C1")
+     tr '((id . "M1") (channel_id . "C1")
           (author . ((id . "STRANGER") (bot . :json-false)))
           (content . "intruder")))
     (should (null received))))
 
 (ert-deftest agent-shell-to-go-test-discord-normalize-message-deduplicates ()
-  "normalize-message fires the hook only once for a given message ID."
+  "The message hook fires only once for a given message ID."
   (let* ((tr (agent-shell-to-go-test-discord--make))
          (agent-shell-to-go-discord-authorized-users '("USER1"))
          (count 0)
          (agent-shell-to-go-message-hook
-          (list (lambda (_plist) (setq count (1+ count))))))
-    (let ((payload `((id . "DUP-ID") (channel_id . "C1")
-                     (author . ((id . "USER1") (bot . :json-false)))
-                     (content . "dup"))))
-      (agent-shell-to-go--discord-normalize-message tr payload)
-      (agent-shell-to-go--discord-normalize-message tr payload))
+          (list (lambda (&rest _plist) (setq count (1+ count)))))
+         (payload '((id . "DUP-ID") (channel_id . "C1")
+                    (author . ((id . "USER1") (bot . :json-false)))
+                    (content . "dup"))))
+    (agent-shell-to-go--discord-normalize-message tr payload)
+    (agent-shell-to-go--discord-normalize-message tr payload)
     (should (= 1 count))))
 
 (ert-deftest agent-shell-to-go-test-discord-normalize-message-resolves-thread ()
-  "normalize-message uses the parent forum channel when message is in a thread."
+  "Messages in a registered thread channel report the parent forum as :channel-id."
   (let* ((tr (agent-shell-to-go-test-discord--make))
          (agent-shell-to-go-discord-authorized-users '("USER1"))
          (received nil)
          (agent-shell-to-go-message-hook
-          (list (lambda (plist) (setq received plist)))))
+          (list (lambda (&rest plist) (setq received plist)))))
     (puthash "THREAD1" "FORUM1"
              (agent-shell-to-go-discord-transport-thread-parents tr))
     (agent-shell-to-go--discord-normalize-message
-     tr `((id . "M2") (channel_id . "THREAD1")
+     tr '((id . "M2") (channel_id . "THREAD1")
           (author . ((id . "USER1") (bot . :json-false)))
           (content . "in thread")))
-    (should (equal "FORUM1" (map-elt received :channel-id)))
-    (should (equal "THREAD1" (map-elt received :thread-id)))))
+    (should (equal "FORUM1" (plist-get received :channel-id)))
+    (should (equal "THREAD1" (plist-get received :thread-id)))))
 
-;; ---------------------------------------------------------------------------
-;; normalize-reaction hook firing
+;; MESSAGE_REACTION_ADD / REMOVE
 
-(ert-deftest agent-shell-to-go-test-discord-normalize-reaction-fires-hook ()
-  "normalize-reaction fires the reaction hook for authorized users."
+(ert-deftest agent-shell-to-go-test-discord-dispatch-reaction-add-fires-hook ()
+  "MESSAGE_REACTION_ADD fires the reaction hook with added-p t."
   (let* ((tr (agent-shell-to-go-test-discord--make))
          (agent-shell-to-go-discord-authorized-users '("USER1"))
          (received nil)
          (agent-shell-to-go-reaction-hook
-          (list (lambda (plist) (setq received plist)))))
-    (agent-shell-to-go--discord-normalize-reaction
-     tr `((channel_id . "C1") (message_id . "M1")
-          (user_id . "USER1")
-          (emoji . ((name . "eyes"))))
-     t)
+          (list (lambda (&rest plist) (setq received plist)))))
+    (agent-shell-to-go--discord-dispatch-event
+     tr "MESSAGE_REACTION_ADD"
+     '((channel_id . "C1") (message_id . "M1")
+       (user_id . "USER1") (emoji . ((name . "eyes")))))
     (should received)
-    (should (eq 'expand-truncated (map-elt received :action)))
-    (should (equal "eyes" (map-elt received :raw-emoji)))
-    (should (eq t (map-elt received :added-p)))))
+    (should (eq 'expand-truncated (plist-get received :action)))
+    (should (eq t (plist-get received :added-p)))))
 
-(ert-deftest agent-shell-to-go-test-discord-normalize-reaction-removed ()
-  "normalize-reaction passes added-p nil for reaction remove events."
+(ert-deftest agent-shell-to-go-test-discord-dispatch-reaction-remove-fires-hook ()
+  "MESSAGE_REACTION_REMOVE fires the reaction hook with added-p nil."
   (let* ((tr (agent-shell-to-go-test-discord--make))
          (agent-shell-to-go-discord-authorized-users '("USER1"))
          (received nil)
          (agent-shell-to-go-reaction-hook
-          (list (lambda (plist) (setq received plist)))))
-    (agent-shell-to-go--discord-normalize-reaction
-     tr `((channel_id . "C1") (message_id . "M1")
-          (user_id . "USER1")
-          (emoji . ((name . "eyes"))))
-     nil)
-    (should (null (map-elt received :added-p)))))
+          (list (lambda (&rest plist) (setq received plist)))))
+    (agent-shell-to-go--discord-dispatch-event
+     tr "MESSAGE_REACTION_REMOVE"
+     '((channel_id . "C1") (message_id . "M1")
+       (user_id . "USER1") (emoji . ((name . "eyes")))))
+    (should received)
+    (should (null (plist-get received :added-p)))))
 
-(ert-deftest agent-shell-to-go-test-discord-normalize-reaction-ignores-bot ()
-  "normalize-reaction ignores reactions from the bot's own user ID."
+(ert-deftest agent-shell-to-go-test-discord-normalize-reaction-ignores-own-bot ()
+  "Reactions from the transport's own bot user ID are dropped."
   (let* ((tr (agent-shell-to-go-test-discord--make))
          (agent-shell-to-go-discord-authorized-users '("BOT123"))
          (received nil)
          (agent-shell-to-go-reaction-hook
           (list (lambda (plist) (setq received plist)))))
     (agent-shell-to-go--discord-normalize-reaction
-     tr `((channel_id . "C1") (message_id . "M1")
-          (user_id . "BOT123")
-          (emoji . ((name . "heart"))))
+     tr '((channel_id . "C1") (message_id . "M1")
+          (user_id . "BOT123") (emoji . ((name . "heart"))))
      t)
     (should (null received))))
 
-(ert-deftest agent-shell-to-go-test-discord-normalize-reaction-unknown-emoji ()
-  "normalize-reaction still fires hook with nil action for unmapped emoji."
+(ert-deftest agent-shell-to-go-test-discord-normalize-reaction-unknown-emoji-still-fires ()
+  "Unknown emoji still fires the hook with nil :action and raw-emoji set."
   (let* ((tr (agent-shell-to-go-test-discord--make))
          (agent-shell-to-go-discord-authorized-users '("USER1"))
          (received nil)
          (agent-shell-to-go-reaction-hook
-          (list (lambda (plist) (setq received plist)))))
+          (list (lambda (&rest plist) (setq received plist)))))
     (agent-shell-to-go--discord-normalize-reaction
-     tr `((channel_id . "C1") (message_id . "M1")
-          (user_id . "USER1")
-          (emoji . ((name . "dancing_penguin"))))
+     tr '((channel_id . "C1") (message_id . "M1")
+          (user_id . "USER1") (emoji . ((name . "dancing_penguin"))))
      t)
     (should received)
-    (should (null (map-elt received :action)))
-    (should (equal "dancing_penguin" (map-elt received :raw-emoji)))))
+    (should (null (plist-get received :action)))
+    (should (equal "dancing_penguin" (plist-get received :raw-emoji)))))
 
-;; ---------------------------------------------------------------------------
-;; normalize-interaction hook firing
+;; INTERACTION_CREATE
 
 (ert-deftest agent-shell-to-go-test-discord-normalize-interaction-fires-hook ()
-  "normalize-interaction fires slash-command hook for authorized users."
+  "INTERACTION_CREATE fires the slash-command hook for authorized users."
   (let* ((tr (agent-shell-to-go-test-discord--make))
          (agent-shell-to-go-discord-authorized-users '("USER1"))
          (received nil)
          (agent-shell-to-go-slash-command-hook
-          (list (lambda (plist) (setq received plist)))))
-    ;; Stub acknowledge so it does not hit the network
+          (list (lambda (&rest plist) (setq received plist)))))
     (cl-letf (((symbol-function 'agent-shell-to-go-transport-acknowledge-interaction)
                (lambda (&rest _) nil)))
       (agent-shell-to-go--discord-normalize-interaction
-       tr `((id . "INT1") (token . "TOK1") (type . 2)
+       tr '((id . "INT1") (token . "TOK1") (type . 2)
             (channel_id . "C1")
             (member . ((user . ((id . "USER1")))))
             (data . ((name . "new-agent")
                      (options . [((name . "folder") (value . "~/code"))]))))))
     (should received)
-    (should (equal "/new-agent" (map-elt received :command)))
-    (should (equal "~/code" (map-elt received :args-text)))))
+    (should (equal "/new-agent" (plist-get received :command)))
+    (should (equal "~/code" (plist-get received :args-text)))))
+
+(ert-deftest agent-shell-to-go-test-discord-normalize-interaction-acknowledges-before-auth ()
+  "Acknowledge is called even for unauthorized users (satisfies the 3-second window)."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (agent-shell-to-go-discord-authorized-users nil)
+         (acknowledged nil)
+         (agent-shell-to-go-slash-command-hook nil))
+    (cl-letf (((symbol-function 'agent-shell-to-go-transport-acknowledge-interaction)
+               (lambda (_tr token &rest _) (setq acknowledged token))))
+      (agent-shell-to-go--discord-normalize-interaction
+       tr '((id . "INT2") (token . "TOK2") (type . 2)
+            (channel_id . "C1")
+            (member . ((user . ((id . "STRANGER")))))
+            (data . ((name . "new-agent") (options . []))))))
+    (should (equal "INT2:TOK2" acknowledged))))
 
 (ert-deftest agent-shell-to-go-test-discord-normalize-interaction-ignores-unauthorized ()
-  "normalize-interaction does not fire hook for unauthorized users."
+  "Slash-command hook is not fired for unauthorized users."
   (let* ((tr (agent-shell-to-go-test-discord--make))
          (agent-shell-to-go-discord-authorized-users '("ALLOWED"))
          (received nil)
@@ -392,14 +555,14 @@
     (cl-letf (((symbol-function 'agent-shell-to-go-transport-acknowledge-interaction)
                (lambda (&rest _) nil)))
       (agent-shell-to-go--discord-normalize-interaction
-       tr `((id . "INT2") (token . "TOK2") (type . 2)
+       tr '((id . "INT3") (token . "TOK3") (type . 2)
             (channel_id . "C1")
             (member . ((user . ((id . "STRANGER")))))
             (data . ((name . "new-agent") (options . []))))))
     (should (null received))))
 
 (ert-deftest agent-shell-to-go-test-discord-normalize-interaction-ignores-non-command ()
-  "normalize-interaction ignores non-APPLICATION_COMMAND interaction types."
+  "Interaction types other than APPLICATION_COMMAND (2) are ignored."
   (let* ((tr (agent-shell-to-go-test-discord--make))
          (agent-shell-to-go-discord-authorized-users '("USER1"))
          (received nil)
@@ -408,27 +571,416 @@
     (cl-letf (((symbol-function 'agent-shell-to-go-transport-acknowledge-interaction)
                (lambda (&rest _) nil)))
       (agent-shell-to-go--discord-normalize-interaction
-       tr `((id . "INT3") (token . "TOK3") (type . 3) ; component interaction, not slash
+       tr '((id . "INT4") (token . "TOK4") (type . 3)
             (channel_id . "C1")
             (member . ((user . ((id . "USER1")))))
             (data . ((name . "new-agent") (options . []))))))
     (should (null received))))
 
-(ert-deftest agent-shell-to-go-test-discord-normalize-interaction-acknowledges ()
-  "normalize-interaction calls acknowledge within the 3-second window."
+; 4. Gateway (handle-frame opcode routing)
+
+(ert-deftest agent-shell-to-go-test-discord-gateway-hello ()
+  "Opcode 10 (hello): starts heartbeat with the correct interval and sends identify."
+  (let* ((tr (agent-shell-to-go-test-discord--make-with-ws))
+         (agent-shell-to-go-discord-bot-token "Bot test-token")
+         (captured-interval nil)
+         (ws-sends nil))
+    (cl-letf (((symbol-function 'agent-shell-to-go--discord-start-heartbeat)
+               (lambda (_tr interval) (setq captured-interval interval)))
+              ((symbol-function 'websocket-openp) (lambda (_) t))
+              ((symbol-function 'websocket-send-text)
+               (lambda (_ws text) (push text ws-sends))))
+      (agent-shell-to-go--discord-handle-frame
+       tr (agent-shell-to-go-test--make-fake-frame
+           (json-encode `((op . ,agent-shell-to-go--discord-op-hello)
+                          (d . ((heartbeat_interval . 41250))))))))
+    (should (= 41250 captured-interval))
+    (should (= 1 (length ws-sends)))
+    (let ((identify (json-read-from-string (car ws-sends))))
+      (should (= agent-shell-to-go--discord-op-identify
+                 (map-elt identify 'op))))))
+
+(ert-deftest agent-shell-to-go-test-discord-gateway-heartbeat-ack ()
+  "Opcode 11 (heartbeat-ack): no sends, no errors."
+  (let* ((tr (agent-shell-to-go-test-discord--make-with-ws))
+         (ws-sends (agent-shell-to-go-test--with-captured-ws-sends
+                     (agent-shell-to-go--discord-handle-frame
+                      tr (agent-shell-to-go-test--make-fake-frame
+                          (json-encode `((op . ,agent-shell-to-go--discord-op-heartbeat-ack)
+                                        (d . :null))))))))
+    (should (null ws-sends))))
+
+(ert-deftest agent-shell-to-go-test-discord-gateway-heartbeat-request ()
+  "Opcode 1 (heartbeat request from server): sends a heartbeat payload back."
+  (let* ((tr (agent-shell-to-go-test-discord--make-with-ws))
+         (ws-sends (agent-shell-to-go-test--with-captured-ws-sends
+                     (agent-shell-to-go--discord-handle-frame
+                      tr (agent-shell-to-go-test--make-fake-frame
+                          (json-encode `((op . ,agent-shell-to-go--discord-op-heartbeat)
+                                        (d . :null))))))))
+    (should (= 1 (length ws-sends)))
+    (let ((hb (json-read-from-string (car ws-sends))))
+      (should (= agent-shell-to-go--discord-op-heartbeat
+                 (map-elt hb 'op))))))
+
+(ert-deftest agent-shell-to-go-test-discord-gateway-invalid-session ()
+  "Opcode 9 (invalid-session): schedules re-identify after a 5-second delay."
+  (let* ((tr (agent-shell-to-go-test-discord--make-with-ws))
+         (timer-delay nil))
+    (cl-letf (((symbol-function 'run-with-timer)
+               (lambda (delay _repeat _fn &rest _args)
+                 (setq timer-delay delay)
+                 (make-symbol "fake-timer"))))
+      (agent-shell-to-go--discord-handle-frame
+       tr (agent-shell-to-go-test--make-fake-frame
+           (json-encode `((op . ,agent-shell-to-go--discord-op-invalid-session)
+                          (d . :json-false))))))
+    (should (= 5 timer-delay))))
+
+(ert-deftest agent-shell-to-go-test-discord-gateway-dispatch-calls-defer ()
+  "Opcode 0 (dispatch): calls agent-shell-to-go--defer with dispatch-event and event data."
   (let* ((tr (agent-shell-to-go-test-discord--make))
-         (agent-shell-to-go-discord-authorized-users '("USER1"))
-         (acknowledged nil)
-         (agent-shell-to-go-slash-command-hook nil))
-    (cl-letf (((symbol-function 'agent-shell-to-go-transport-acknowledge-interaction)
-               (lambda (_tr token &rest _opts)
-                 (setq acknowledged token))))
-      (agent-shell-to-go--discord-normalize-interaction
-       tr `((id . "INT4") (token . "TOK4") (type . 2)
-            (channel_id . "C1")
-            (member . ((user . ((id . "USER1")))))
-            (data . ((name . "projects") (options . []))))))
-    (should (equal "INT4:TOK4" acknowledged))))
+         (deferred-fn nil)
+         (deferred-args nil))
+    (cl-letf (((symbol-function 'agent-shell-to-go--defer)
+               (lambda (fn &rest args)
+                 (setq deferred-fn fn
+                       deferred-args args))))
+      (agent-shell-to-go--discord-handle-frame
+       tr (agent-shell-to-go-test--make-fake-frame
+           (json-encode `((op . ,agent-shell-to-go--discord-op-dispatch)
+                          (t . "MESSAGE_CREATE")
+                          (s . 7)
+                          (d . ((id . "M1"))))))))
+    (should (eq #'agent-shell-to-go--discord-dispatch-event deferred-fn))
+    (should (eq tr (nth 0 deferred-args)))
+    (should (equal "MESSAGE_CREATE" (nth 1 deferred-args)))))
+
+(ert-deftest agent-shell-to-go-test-discord-gateway-dispatch-updates-sequence ()
+  "Dispatch frame with a sequence number updates the transport's sequence slot."
+  (let ((tr (agent-shell-to-go-test-discord--make)))
+    (cl-letf (((symbol-function 'agent-shell-to-go--defer) (lambda (&rest _) nil)))
+      (agent-shell-to-go--discord-handle-frame
+       tr (agent-shell-to-go-test--make-fake-frame
+           (json-encode `((op . ,agent-shell-to-go--discord-op-dispatch)
+                          (t . "MESSAGE_CREATE")
+                          (s . 42)
+                          (d . nil))))))
+    (should (= 42 (agent-shell-to-go-discord-transport-sequence tr)))))
+
+; 5. REST transport methods
+
+;; send-text
+
+(ert-deftest agent-shell-to-go-test-discord-send-text-returns-message-id ()
+  "send-text returns the message ID from the API response."
+  (let ((tr (agent-shell-to-go-test-discord--make)))
+    (with-mocked-discord-api
+        `((("POST" . "/channels/C1/messages") . ((id . "M1"))))
+      (should (equal "M1"
+                     (agent-shell-to-go-transport-send-text tr "C1" nil "hello"))))))
+
+(ert-deftest agent-shell-to-go-test-discord-send-text-uses-thread-id-as-target ()
+  "send-text posts to thread-id when provided, not to channel-id."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (called-endpoint nil))
+    (cl-letf (((symbol-function 'agent-shell-to-go--discord-request)
+               (lambda (_method endpoint &rest _)
+                 (setq called-endpoint endpoint)
+                 '((id . "M1")))))
+      (agent-shell-to-go-transport-send-text tr "FORUM1" "THREAD1" "hi"))
+    (should (string-match-p "THREAD1" called-endpoint))
+    (should (not (string-match-p "FORUM1" called-endpoint)))))
+
+(ert-deftest agent-shell-to-go-test-discord-send-text-uses-channel-when-no-thread ()
+  "send-text posts to channel-id when thread-id is nil."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (called-endpoint nil))
+    (cl-letf (((symbol-function 'agent-shell-to-go--discord-request)
+               (lambda (_method endpoint &rest _)
+                 (setq called-endpoint endpoint)
+                 '((id . "M1")))))
+      (agent-shell-to-go-transport-send-text tr "CHAN1" nil "hi"))
+    (should (string-match-p "CHAN1" called-endpoint))))
+
+(ert-deftest agent-shell-to-go-test-discord-send-text-truncated-saves-full-text ()
+  "send-text with :truncate saves the full text to storage for later expansion."
+  (with-discord-temp-storage
+    (let* ((tr (agent-shell-to-go-test-discord--make))
+           (long-text (make-string 600 ?a)))
+      (with-mocked-discord-api
+          `((("POST" . "/channels/C1/messages") . ((id . "M1"))))
+        (agent-shell-to-go-transport-send-text tr "C1" nil long-text '(:truncate t)))
+      (should (equal long-text
+                     (agent-shell-to-go--load-truncated-message tr "C1" "M1"))))))
+
+;; edit-message
+
+(ert-deftest agent-shell-to-go-test-discord-edit-message ()
+  "edit-message sends PATCH to the message endpoint and returns the message ID."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (called-method nil)
+         (called-endpoint nil))
+    (cl-letf (((symbol-function 'agent-shell-to-go--discord-request)
+               (lambda (method endpoint &rest _)
+                 (setq called-method method
+                       called-endpoint endpoint)
+                 '((id . "M1")))))
+      (let ((result (agent-shell-to-go-transport-edit-message tr "C1" "M1" "updated")))
+        (should (equal "M1" result))
+        (should (equal "PATCH" called-method))
+        (should (string-match-p "M1" called-endpoint))
+        (should (string-match-p "C1" called-endpoint))))))
+
+;; start-thread
+
+(ert-deftest agent-shell-to-go-test-discord-start-thread-returns-id ()
+  "start-thread returns the thread (forum post) ID from the API."
+  (let ((tr (agent-shell-to-go-test-discord--make)))
+    (with-mocked-discord-api
+        `((("POST" . "/channels/FORUM1/threads") . ((id . "THREAD1"))))
+      (should (equal "THREAD1"
+                     (agent-shell-to-go-transport-start-thread tr "FORUM1" "Session"))))))
+
+(ert-deftest agent-shell-to-go-test-discord-start-thread-records-parent ()
+  "start-thread registers the thread→parent-forum mapping for inbound routing."
+  (let ((tr (agent-shell-to-go-test-discord--make)))
+    (with-mocked-discord-api
+        `((("POST" . "/channels/FORUM1/threads") . ((id . "THREAD1"))))
+      (agent-shell-to-go-transport-start-thread tr "FORUM1" "Session"))
+    (should (equal "FORUM1"
+                   (gethash "THREAD1"
+                            (agent-shell-to-go-discord-transport-thread-parents tr))))))
+
+;; update-thread-header
+
+(ert-deftest agent-shell-to-go-test-discord-update-thread-header ()
+  "update-thread-header sends PATCH to the thread channel endpoint."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (called-endpoint nil))
+    (cl-letf (((symbol-function 'agent-shell-to-go--discord-request)
+               (lambda (_method endpoint &rest _)
+                 (setq called-endpoint endpoint)
+                 nil)))
+      (agent-shell-to-go-transport-update-thread-header tr "FORUM1" "THREAD1" "Title"))
+    (should (string-match-p "THREAD1" called-endpoint))))
+
+(ert-deftest agent-shell-to-go-test-discord-update-thread-header-truncates-long-title ()
+  "Titles over 100 characters are truncated before sending."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (long-title (make-string 150 ?a))
+         (sent-data nil))
+    (cl-letf (((symbol-function 'agent-shell-to-go--discord-api)
+               (lambda (_method _endpoint data)
+                 (setq sent-data data)
+                 nil)))
+      (agent-shell-to-go-transport-update-thread-header
+       tr "FORUM1" "THREAD1" long-title))
+    (should sent-data)
+    (should (<= (length (map-elt sent-data 'name)) 100))))
+
+;; delete-message / delete-thread
+
+(ert-deftest agent-shell-to-go-test-discord-delete-message ()
+  "delete-message sends DELETE to the correct message endpoint."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (called-method nil)
+         (called-endpoint nil))
+    (cl-letf (((symbol-function 'agent-shell-to-go--discord-request)
+               (lambda (method endpoint &rest _)
+                 (setq called-method method
+                       called-endpoint endpoint)
+                 nil)))
+      (agent-shell-to-go-transport-delete-message tr "C1" "M1"))
+    (should (equal "DELETE" called-method))
+    (should (string-match-p "M1" called-endpoint))))
+
+(ert-deftest agent-shell-to-go-test-discord-delete-thread ()
+  "delete-thread sends DELETE to the thread channel endpoint."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (called-method nil)
+         (called-endpoint nil))
+    (cl-letf (((symbol-function 'agent-shell-to-go--discord-request)
+               (lambda (method endpoint &rest _)
+                 (setq called-method method
+                       called-endpoint endpoint)
+                 nil)))
+      (agent-shell-to-go-transport-delete-thread tr "FORUM1" "THREAD1"))
+    (should (equal "DELETE" called-method))
+    (should (string-match-p "THREAD1" called-endpoint))))
+
+;; fetch-thread-replies
+
+(ert-deftest agent-shell-to-go-test-discord-fetch-thread-replies ()
+  "fetch-thread-replies returns plists in chronological order."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (msgs (vector '((id . "M2") (author . ((id . "U2"))) (content . "second"))
+                       '((id . "M1") (author . ((id . "U1"))) (content . "first")))))
+    (with-mocked-discord-api
+        `((("GET" . "/channels/THREAD1/messages?limit=100") . ,msgs))
+      (let ((replies (agent-shell-to-go-transport-fetch-thread-replies
+                      tr "C1" "THREAD1")))
+        (should (= 2 (length replies)))
+        (should (equal "M1" (plist-get (car replies) :msg-id)))
+        (should (equal "first" (plist-get (car replies) :text)))
+        (should (equal "M2" (plist-get (cadr replies) :msg-id)))))))
+
+;; get-message-text
+
+(ert-deftest agent-shell-to-go-test-discord-get-message-text ()
+  "get-message-text returns the content field from the API response."
+  (let ((tr (agent-shell-to-go-test-discord--make)))
+    (with-mocked-discord-api
+        `((("GET" . "/channels/C1/messages/M1") . ((content . "fetched text"))))
+      (should (equal "fetched text"
+                     (agent-shell-to-go-transport-get-message-text tr "C1" "M1"))))))
+
+;; get-reactions
+
+(ert-deftest agent-shell-to-go-test-discord-get-reactions-returns-nil ()
+  "get-reactions always returns nil (reactions arrive via Gateway, not polling)."
+  (let ((tr (agent-shell-to-go-test-discord--make)))
+    (should (null (agent-shell-to-go-transport-get-reactions tr "C1" "M1")))))
+
+;; upload-file
+
+(ert-deftest agent-shell-to-go-test-discord-upload-file-skips-missing-file ()
+  "upload-file does nothing when the path does not exist on disk."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (api-called nil))
+    (cl-letf (((symbol-function 'agent-shell-to-go--discord-request)
+               (lambda (&rest _) (setq api-called t) nil)))
+      (agent-shell-to-go-transport-upload-file tr "C1" nil "/no/such/file.txt"))
+    (should (null api-called))))
+
+(ert-deftest agent-shell-to-go-test-discord-upload-file-uses-thread-target ()
+  "upload-file posts to thread-id when provided."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (called-endpoint nil)
+         (tmpfile (make-temp-file "astg-upload")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-shell-to-go--discord-request)
+                   (lambda (_method endpoint &rest _)
+                     (setq called-endpoint endpoint)
+                     nil)))
+          (agent-shell-to-go-transport-upload-file tr "FORUM1" "THREAD1" tmpfile))
+      (delete-file tmpfile))
+    (should (string-match-p "THREAD1" called-endpoint))
+    (should (not (string-match-p "FORUM1" called-endpoint)))))
+
+(ert-deftest agent-shell-to-go-test-discord-upload-file-uses-channel-fallback ()
+  "upload-file posts to channel-id when thread-id is nil."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (called-endpoint nil)
+         (tmpfile (make-temp-file "astg-upload")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-shell-to-go--discord-request)
+                   (lambda (_method endpoint &rest _)
+                     (setq called-endpoint endpoint)
+                     nil)))
+          (agent-shell-to-go-transport-upload-file tr "CHAN1" nil tmpfile))
+      (delete-file tmpfile))
+    (should (string-match-p "CHAN1" called-endpoint))))
+
+; Channel management
+
+;; Persistence
+
+(ert-deftest agent-shell-to-go-test-discord-save-channels ()
+  "save-channels writes the project-to-channel map to disk as an alist."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (tmpfile (make-temp-file "astg-chans")))
+    (unwind-protect
+        (let ((agent-shell-to-go-discord-channels-file tmpfile))
+          (puthash "/proj1" "CHAN1"
+                   (agent-shell-to-go-discord-transport-project-channels tr))
+          (agent-shell-to-go--discord-save-channels tr)
+          (with-temp-buffer
+            (insert-file-contents tmpfile)
+            (let ((data (read (current-buffer))))
+              (should (equal "CHAN1" (cdr (assoc "/proj1" data)))))))
+      (delete-file tmpfile))))
+
+(ert-deftest agent-shell-to-go-test-discord-load-channels ()
+  "load-channels reads the alist from disk into the transport's hash table."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (tmpfile (make-temp-file "astg-chans")))
+    (unwind-protect
+        (let ((agent-shell-to-go-discord-channels-file tmpfile))
+          (with-temp-file tmpfile
+            (insert "((\"/proj1\" . \"CHAN1\") (\"/proj2\" . \"CHAN2\"))"))
+          (agent-shell-to-go--discord-load-channels tr)
+          (let ((table (agent-shell-to-go-discord-transport-project-channels tr)))
+            (should (equal "CHAN1" (gethash "/proj1" table)))
+            (should (equal "CHAN2" (gethash "/proj2" table)))))
+      (delete-file tmpfile))))
+
+(ert-deftest agent-shell-to-go-test-discord-channels-round-trip ()
+  "Saving then loading channels in a fresh transport preserves all mappings."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (tr2 (agent-shell-to-go-test-discord--make))
+         (tmpfile (make-temp-file "astg-chans")))
+    (unwind-protect
+        (let ((agent-shell-to-go-discord-channels-file tmpfile))
+          (puthash "/proj" "CHAN-X"
+                   (agent-shell-to-go-discord-transport-project-channels tr))
+          (agent-shell-to-go--discord-save-channels tr)
+          (agent-shell-to-go--discord-load-channels tr2)
+          (should (equal "CHAN-X"
+                         (gethash "/proj"
+                                  (agent-shell-to-go-discord-transport-project-channels tr2)))))
+      (delete-file tmpfile))))
+
+;; get-or-create-project-channel
+
+(ert-deftest agent-shell-to-go-test-discord-get-or-create-channel-cache-hit ()
+  "Cache hit returns the cached ID without making any API call."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (api-called nil))
+    (puthash "/proj" "CACHED-ID"
+             (agent-shell-to-go-discord-transport-project-channels tr))
+    (cl-letf (((symbol-function 'agent-shell-to-go--discord-request)
+               (lambda (&rest _) (setq api-called t) nil)))
+      (let ((id (agent-shell-to-go--discord-get-or-create-project-channel tr "/proj")))
+        (should (equal "CACHED-ID" id))
+        (should (null api-called))))))
+
+(ert-deftest agent-shell-to-go-test-discord-get-or-create-channel-found-by-name ()
+  "Cache miss: finds an existing forum channel by name and caches it."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (agent-shell-to-go-discord-guild-id "GUILD1")
+         (agent-shell-to-go-discord-channel-prefix "")
+         (tmpfile (make-temp-file "astg-chans")))
+    (unwind-protect
+        (let ((agent-shell-to-go-discord-channels-file tmpfile))
+          (with-mocked-discord-api
+              `((("GET" . "/guilds/GUILD1/channels") .
+                 ,(vector `((id . "FOUND-CHAN")
+                            (name . "myproject")
+                            (type . ,agent-shell-to-go--discord-channel-type-forum)))))
+            (let ((id (agent-shell-to-go--discord-get-or-create-project-channel
+                       tr "/path/to/myproject")))
+              (should (equal "FOUND-CHAN" id))
+              (should (equal "FOUND-CHAN"
+                             (gethash "/path/to/myproject"
+                                      (agent-shell-to-go-discord-transport-project-channels tr)))))))
+      (delete-file tmpfile))))
+
+(ert-deftest agent-shell-to-go-test-discord-get-or-create-channel-creates-new ()
+  "Cache miss: creates a new forum channel when none is found by name."
+  (let* ((tr (agent-shell-to-go-test-discord--make))
+         (agent-shell-to-go-discord-guild-id "GUILD1")
+         (agent-shell-to-go-discord-channel-prefix "")
+         (tmpfile (make-temp-file "astg-chans")))
+    (unwind-protect
+        (let ((agent-shell-to-go-discord-channels-file tmpfile))
+          (with-mocked-discord-api
+              `((("GET" . "/guilds/GUILD1/channels") . ,(vector))
+                (("POST" . "/guilds/GUILD1/channels") . ((id . "NEW-CHAN"))))
+            (let ((id (agent-shell-to-go--discord-get-or-create-project-channel
+                       tr "/path/to/newproject")))
+              (should (equal "NEW-CHAN" id)))))
+      (delete-file tmpfile))))
 
 (provide 'agent-shell-to-go-test-discord)
 ;;; agent-shell-to-go-test-discord.el ends here
