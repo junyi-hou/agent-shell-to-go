@@ -138,12 +138,6 @@
 
 (require 'ert)
 
-(let ((root
-       (expand-file-name ".."
-                         (file-name-directory
-                          (or load-file-name buffer-file-name ".")))))
-  (add-to-list 'load-path root))
-
 (require 'agent-shell-to-go-discord)
 (require 'gateway-helpers)
 
