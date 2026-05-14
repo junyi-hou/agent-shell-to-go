@@ -1,4 +1,4 @@
-;;; agent-shell-to-go-test-bridge.el --- Unit tests for agent-shell-to-go-bridge.el -*- lexical-binding: t; -*-
+;;; agent-shell-to-go-bridge-test.el --- Unit tests for agent-shell-to-go-bridge.el -*- lexical-binding: t; -*-
 
 ;; This file is not part of GNU Emacs.
 
@@ -764,5 +764,5 @@ since the client struct was created successfully before the RPC failed."
          (lambda (text) (string-match-p "Agent error" text))
          (agent-shell-to-go-test-bridge--sent-texts tr)))))))
 
-(provide 'agent-shell-to-go-test-bridge)
-;;; agent-shell-to-go-test-bridge.el ends here
+(provide 'agent-shell-to-go-bridge-test)
+;;; agent-shell-to-go-bridge-test.el ends here

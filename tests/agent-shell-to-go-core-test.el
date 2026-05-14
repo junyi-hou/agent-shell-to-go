@@ -1,4 +1,4 @@
-;;; agent-shell-to-go-test-core.el --- Tests for agent-shell-to-go.el -*- lexical-binding: t; -*-
+;;; agent-shell-to-go-core-test.el --- Tests for agent-shell-to-go.el -*- lexical-binding: t; -*-
 
 ;; This file is not part of GNU Emacs.
 
@@ -156,5 +156,5 @@
     (let ((default-directory "/work/acme/myproject/"))
       (should (eq tr-acme (agent-shell-to-go--get-transport))))))
 
-(provide 'agent-shell-to-go-test-core)
-;;; agent-shell-to-go-test-core.el ends here
+(provide 'agent-shell-to-go-core-test)
+;;; agent-shell-to-go-core-test.el ends here

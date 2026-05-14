@@ -10,7 +10,7 @@ if [ -n "$1" ]; then
     *)  FILES="$SCRIPT_DIR/$1" ;;
   esac
 else
-  FILES="$(echo "$SCRIPT_DIR"/agent-shell-to-go-test-*.el)"
+  FILES="$(echo "$SCRIPT_DIR"/*-test.el)"
 fi
 
 emacs -batch \

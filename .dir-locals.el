@@ -9,6 +9,6 @@
                                                                     (or (and (project-current) (project-root (project-current))) default-directory))
                                                                    (test-file
                                                                     (completing-read
-                                                                     "Run test: " (directory-files-recursively "tests" ".+-test-.*\\.el"))))
+                                                                     "Run test: " (directory-files "tests" nil ".+-test\\.el"))))
                                                               `("make" "test" ,(format "TEST=%s" (file-name-nondirectory test-file)))))))
   ))
