@@ -52,24 +52,7 @@ Forum channels (type 15) are required — one per project (or one shared default
 2. Right-click your server icon → **Copy Server ID**.
 3. Set `agent-shell-to-go-discord-guild-id` to this value.
 
-## 6. Configure Emacs
-
-```elisp
-(setq agent-shell-to-go-discord-bot-token  "Bot YOUR_TOKEN_HERE"
-      agent-shell-to-go-discord-guild-id   "YOUR_GUILD_ID"
-      agent-shell-to-go-discord-channel-id "YOUR_FORUM_CHANNEL_ID"
-      agent-shell-to-go-discord-authorized-users '("YOUR_DISCORD_USER_ID"))
-```
-
-Or store credentials in your env file (default `~/.doom.d/.env`):
-
-```
-DISCORD_BOT_TOKEN=Bot YOUR_TOKEN_HERE
-DISCORD_GUILD_ID=YOUR_GUILD_ID
-DISCORD_CHANNEL_ID=YOUR_FORUM_CHANNEL_ID
-```
-
-## 7. Register Slash Commands
+## 6. Register Slash Commands
 
 Run once after setup (or after changing command definitions):
 
@@ -79,17 +62,4 @@ M-x agent-shell-to-go-discord-register-commands
 
 Guild-scoped commands (using `agent-shell-to-go-discord-guild-id`) are active immediately. Global commands can take up to an hour to propagate.
 
-## 8. Custom Reaction Emojis (optional)
-
-The reaction map uses custom server emoji names. To enable reactions, create server emojis with matching names:
-
-| Emoji name | Action |
-|---|---|
-| `see_no_evil`, `no_bell` | Hide message |
-| `eyes` | Show truncated output |
-| `open_book`, `green_book` | Show full output |
-| `white_check_mark`, `thumbsup` | Allow tool permission |
-| `unlock`, `star` | Always allow |
-| `x`, `thumbsdown` | Reject |
-
-Server Settings → Emoji → Upload Emoji, then name each one exactly as shown above.
+Then [configure credentials](../README.md#discord).
