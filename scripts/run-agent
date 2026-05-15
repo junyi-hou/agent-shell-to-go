@@ -31,6 +31,7 @@ exec emacs -Q \
     -L "$DEPS_DIR/websocket" \
     -L "$PROJECT_ROOT" \
     ${CONFIG_LOAD[@]+"${CONFIG_LOAD[@]}"} \
+    --eval "(require 'agent-shell)" \
     --eval "(require 'agent-shell-to-go)" \
     --eval "(when-let* ((v (getenv \"SLACK_BOT_TOKEN\")))     (setq agent-shell-to-go-slack-bot-token v))" \
     --eval "(when-let* ((v (getenv \"SLACK_APP_TOKEN\")))     (setq agent-shell-to-go-slack-app-token v))" \
