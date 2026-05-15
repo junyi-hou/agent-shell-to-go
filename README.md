@@ -116,10 +116,12 @@ With `use-package`:
 
 ```elisp
 (use-package agent-shell-to-go
-  :load-path "~/code/agent-shell-to-go"
+  :load-path "path/to/agent-shell-to-go"
   :after agent-shell
   :config
-  (setq agent-shell-to-go-slack-authorized-users '("U01234567")))
+  (setq agent-shell-to-go-slack-authorized-users '("U01234567"))
+  ;; optionally symlink `scripts/run-agent` to ~/.local/bin
+  (make-symbolic-link "path/to/agent-shell-to-go/scripts/run-agent" (expand-file-name "~/.local/bin/run-agent")))
 ```
 
 ## Usage
