@@ -63,17 +63,17 @@ If nil, NO ONE can interact (secure by default)."
   :group 'agent-shell-to-go)
 
 (defcustom agent-shell-to-go-discord-reaction-map
-  '((hide . ("see_no_evil" "no_bell"))
-    (expand-truncated . ("eyes"))
-    (expand-full . ("open_book" "green_book"))
-    (permission-allow . ("white_check_mark" "thumbsup"))
-    (permission-always . ("unlock" "star"))
-    (permission-reject . ("x" "thumbsdown")))
-  "Map canonical action symbols to Discord custom emoji names.
-Values are the ASCII names of custom server emojis (emoji.name in Gateway events).
-Standard Unicode emoji reactions use the Unicode character as name, so this map
-works with custom Discord server emojis — create server emojis with these names
-to enable each action."
+  '((hide . ("see_no_evil" "no_bell" "🙈" "🔕"))
+    (expand-truncated . ("eyes" "👀"))
+    (expand-full . ("open_book" "green_book" "📖" "📗"))
+    (permission-allow . ("white_check_mark" "thumbsup" "✅" "👍"))
+    (permission-always . ("unlock" "star" "🔓" "⭐"))
+    (permission-reject . ("x" "thumbsdown" "❌" "👎")))
+  "Map canonical action symbols to Discord emoji names.
+Values are matched against emoji.name in Gateway events.  This includes both
+custom server emoji names (ASCII shortcodes like \"thumbsup\") and standard
+Unicode emoji characters (like \"👍\") — Discord sends the Unicode character
+as the name for built-in emoji, and the shortcode for custom server emoji."
   :type '(alist :key-type symbol :value-type (repeat string))
   :group 'agent-shell-to-go)
 
