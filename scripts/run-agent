@@ -45,4 +45,5 @@ exec emacs -Q \
     --eval "(when-let* ((v (getenv \"DEFAULT_TRANSPORT\")))      (setq agent-shell-to-go-default-transport (intern v)))" \
     --eval "(when-let* ((v (getenv \"AGENT_PREFERRED_CONFIG\"))) (setq agent-shell-preferred-agent-config (intern v)))" \
     --eval "(agent-shell-to-go-setup)" \
+    --eval "(setq enable-local-variables :all)" \
     --eval "(let ((default-directory \"$PROJ_PATH\")) (agent-shell-new-shell))"

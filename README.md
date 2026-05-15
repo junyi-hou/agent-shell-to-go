@@ -133,6 +133,7 @@ There are two ways that I use this package:
     - Therefore, I use this method only when I know that my AFK will be a short amount of time (e.g., coffee run)
     - To avoid worrying about disconnection, I instead
 - Start an agent from a server (with emacs already set up): using `scripts/run-agent PROJ-PATH`, which runs `emacs -Q` with all package dependencies on the load path and opens a new agent-shell in PROJ-PATH. See [scripts/config.el](scripts/config.el) for an example config; copy it to `~/.config/agent-shell-to-go/config.el` and fill in your credentials. Environment variables (`SLACK_BOT_TOKEN`, `DISCORD_BOT_TOKEN`, etc.) can be used to override anything set in the config file.
+    - **Security note:** `run-agent` sets `enable-local-variables` to `:all` so the headless Emacs doesn't hang waiting for confirmation on risky dir-local variables. This also silently applies any `eval` forms found in `.dir-locals.el` inside the project directory. Only point it at projects whose `.dir-locals.el` you trust.
 
 ### In-thread commands
 
