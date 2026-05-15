@@ -1,5 +1,10 @@
 ;;; agent-shell-to-go-bridge.el --- agent-shell integration for agent-shell-to-go -*- lexical-binding: t; -*-
 
+;; Copyright (C) 2026 Elle Najt
+
+;; Author: Elle Najt
+;; Maintainer: junyi.hou <junyi.yi.hou@gmail.com>
+
 ;; This file is not part of GNU Emacs.
 
 ;;; Commentary:

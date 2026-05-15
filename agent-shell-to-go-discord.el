@@ -1,5 +1,10 @@
 ;;; agent-shell-to-go-discord.el --- Discord transport for agent-shell-to-go -*- lexical-binding: t; -*-
 
+;; Copyright (C) 2026 Elle Najt
+
+;; Author: Elle Najt
+;; Maintainer: junyi.hou <junyi.yi.hou@gmail.com>
+
 ;; This file is not part of GNU Emacs.
 
 ;;; Commentary:

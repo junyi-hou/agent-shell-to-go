@@ -3,8 +3,9 @@
 ;; Copyright (C) 2026 Elle Najt
 
 ;; Author: Elle Najt
+;; Maintainer: junyi.hou <junyi.yi.hou@gmail.com>
 ;; URL: https://github.com/ElleNajt/agent-shell-to-go
-;; Version: 0.3.1
+;; Version: 0.4.0
 ;; Package-Requires: ((emacs "29.1") (agent-shell "0.50.1") (acp "0.11.3") (shell-maker "0.90.1") (websocket "1.14"))
 ;; Keywords: convenience, tools, ai
 
