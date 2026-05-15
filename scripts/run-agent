@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DEPS_DIR="$PROJECT_ROOT/tests/deps"
 
@@ -30,7 +30,7 @@ exec emacs -Q \
     -L "$DEPS_DIR/agent-shell" \
     -L "$DEPS_DIR/websocket" \
     -L "$PROJECT_ROOT" \
-    "${CONFIG_LOAD[@]}" \
+    ${CONFIG_LOAD[@]+"${CONFIG_LOAD[@]}"} \
     --eval "(require 'agent-shell-to-go)" \
     --eval "(when-let* ((v (getenv \"SLACK_BOT_TOKEN\")))     (setq agent-shell-to-go-slack-bot-token v))" \
     --eval "(when-let* ((v (getenv \"SLACK_APP_TOKEN\")))     (setq agent-shell-to-go-slack-app-token v))" \
@@ -44,4 +44,4 @@ exec emacs -Q \
     --eval "(when-let* ((v (getenv \"DEFAULT_TRANSPORT\")))      (setq agent-shell-to-go-default-transport (intern v)))" \
     --eval "(when-let* ((v (getenv \"AGENT_PREFERRED_CONFIG\"))) (setq agent-shell-preferred-agent-config (intern v)))" \
     --eval "(agent-shell-to-go-setup)" \
-    --eval "(let ((default-directory \"$PROJ_PATH\")) (funcall agent-shell-to-go-run-agent-function))"
+    --eval "(let ((default-directory \"$PROJ_PATH\")) (agent-shell-new-shell))"
