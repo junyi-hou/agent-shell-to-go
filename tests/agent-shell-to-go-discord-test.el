@@ -63,8 +63,7 @@
 ;;     - dispatch-reaction-remove-fires-hook: MESSAGE_REACTION_REMOVE fires hook with added-p nil
 ;;
 ;;   agent-shell-to-go--discord-normalize-message
-;;     - normalize-message-ignores-bot: author.bot = t is silently dropped
-;;     - normalize-message-ignores-own-bot-id: own bot user ID is dropped
+;;     - normalize-message-ignores-bot: author.bot = t or user-id matches bot-uid is silently dropped
 ;;     - normalize-message-ignores-unauthorized: unauthorized users are dropped
 ;;     - normalize-message-deduplicates: same message ID fires hook only once
 ;;     - normalize-message-resolves-thread: thread channel reports parent forum as :channel-id
@@ -389,32 +388,27 @@ RESPONSES is an alist keyed by (METHOD . ENDPOINT); unmatched calls return nil."
     (should (equal "USER1" (plist-get received :user)))))
 
 (ert-deftest agent-shell-to-go-test-discord-normalize-message-ignores-bot ()
-  "Messages where author.bot is t are silently dropped."
+  "Messages from bots or the cached bot user ID are silently dropped."
   (let* ((tr (agent-shell-to-go-test-discord--make))
-         (agent-shell-to-go-discord-authorized-users '("USER1"))
+         (agent-shell-to-go-discord-authorized-users '("USER1" "BOT123"))
          (received nil)
          (agent-shell-to-go-message-hook (list (lambda (plist) (setq received plist)))))
-    (agent-shell-to-go--discord-normalize-message
-     tr
-     '((id . "M1")
-       (channel_id . "C1")
-       (author . ((id . "USER1") (bot . t)))
-       (content . "bot msg")))
-    (should (null received))))
-
-(ert-deftest agent-shell-to-go-test-discord-normalize-message-ignores-own-bot-id ()
-  "Messages whose author ID matches the cached bot user ID are dropped."
-  (let* ((tr (agent-shell-to-go-test-discord--make))
-         (agent-shell-to-go-discord-authorized-users '("BOT123"))
-         (received nil)
-         (agent-shell-to-go-message-hook (list (lambda (plist) (setq received plist)))))
-    (agent-shell-to-go--discord-normalize-message
-     tr
-     '((id . "M1")
-       (channel_id . "C1")
-       (author . ((id . "BOT123") (bot . :json-false)))
-       (content . "echo")))
-    (should (null received))))
+    (ert-info ("author.bot = t")
+      (agent-shell-to-go--discord-normalize-message
+       tr
+       '((id . "M1")
+         (channel_id . "C1")
+         (author . ((id . "USER1") (bot . t)))
+         (content . "bot msg")))
+      (should (null received)))
+    (ert-info ("user-id matches cached bot-uid")
+      (agent-shell-to-go--discord-normalize-message
+       tr
+       '((id . "M2")
+         (channel_id . "C1")
+         (author . ((id . "BOT123") (bot . :json-false)))
+         (content . "echo")))
+      (should (null received)))))
 
 (ert-deftest agent-shell-to-go-test-discord-normalize-message-ignores-unauthorized ()
   "Messages from unauthorized users are dropped."
