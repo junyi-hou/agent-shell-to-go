@@ -162,6 +162,7 @@ Send these in the thread to control the session:
 | `/project` | List projects (immeidate subdirectories) under `agent-shell-to-go-projects-directory` |
 | `/sessions [proj-name]` | List past sessions for a project, infer from the current channel if proj-name is not given |
 | `/resume [N] [proj-name]` | Resume the Nth session (default: most recent) of proj-name |
+| `/projects` | List projects (immeidate subdirectories) under `agent-shell-to-go-projects-directory` |
 
 See each transport's setup doc for how to register slash commands.
 

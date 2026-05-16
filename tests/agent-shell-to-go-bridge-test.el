@@ -55,6 +55,8 @@
 ;;     - slash-new-agent-success: /new-agent with valid folder starts agent and confirms
 ;;     - slash-new-project-missing-arg: /new-project with no project-name replies with usage
 ;;     - slash-new-project-existing-dir: /new-project with existing dir replies with error
+;;     - slash-project-lists-subdirs: /project lists non-hidden subdirectories
+;;     - slash-project-empty-dir: /project with empty directory replies with no-projects message
 ;;   agent-shell-to-go--on-init-client
 ;;     - on-init-client-nil-client: failure branch when :client is nil
 ;;   agent-shell-to-go--on-error
@@ -871,6 +873,37 @@ notice is sent via init-finished once the ACP handshake completes."
                   (lambda (text) (string-match-p "No session #5" text))
                   (agent-shell-to-go-test-bridge--sent-texts tr))))))
         (delete-directory tmpdir t)))))
+(ert-deftest agent-shell-to-go-test-bridge-slash-project-lists-subdirs ()
+  "/project lists non-hidden subdirectories under agent-shell-to-go-projects-directory."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
+           (tmpdir (make-temp-file "ag2g-test-projects" t)))
+      (unwind-protect
+          (let ((agent-shell-to-go-projects-directory tmpdir))
+            (make-directory (expand-file-name "alpha" tmpdir))
+            (make-directory (expand-file-name "beta" tmpdir))
+            (make-directory (expand-file-name ".hidden" tmpdir))
+            (agent-shell-to-go-test-inbound-slash-command tr channel "/project")
+            (let ((texts (agent-shell-to-go-test-bridge--sent-texts tr)))
+              (should (cl-some (lambda (t) (string-match-p "alpha" t)) texts))
+              (should (cl-some (lambda (t) (string-match-p "beta" t)) texts))
+              (should (cl-notany (lambda (t) (string-match-p "hidden" t)) texts))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest agent-shell-to-go-test-bridge-slash-project-empty-dir ()
+  "/project with an empty directory replies with a no-projects message."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
+           (tmpdir (make-temp-file "ag2g-test-projects-empty" t)))
+      (unwind-protect
+          (let ((agent-shell-to-go-projects-directory tmpdir))
+            (agent-shell-to-go-test-inbound-slash-command tr channel "/project")
+            (should
+             (cl-some
+              (lambda (text) (string-match-p "No projects found" text))
+              (agent-shell-to-go-test-bridge--sent-texts tr))))
+        (delete-directory tmpdir t)))))
+
 
 (ert-deftest agent-shell-to-go-test-bridge-on-init-client-nil-client ()
   "When init-client fires with :client nil in agent-shell state, failure notice is sent.

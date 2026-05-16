@@ -419,6 +419,21 @@ Presentation reactions are handled by the main dispatcher registered first."
                               start-fn)
                    (make-directory project-dir t)
                    (funcall start-fn project-dir))))))))
+      ("/projects" (let* ((dir (expand-file-name agent-shell-to-go-projects-directory))
+              (names
+               (and (file-directory-p dir)
+                    (seq-filter
+                     (lambda (f)
+                       (and (not (string-prefix-p "." f))
+                            (file-directory-p (expand-file-name f dir))))
+                     (directory-files dir)))))
+         (if (null names)
+             (funcall reply (format "No projects found in `%s`." dir))
+           (funcall reply
+                    (string-join (cons
+                                  (format "Projects in `%s`:" dir)
+                                  (mapcar (lambda (n) (format "• %s" n)) names))
+                                 "\n")))))
       ("/sessions" (let* ((proj-name (map-elt typed-args :project-name))
               (project-path
                (if proj-name
