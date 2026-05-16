@@ -94,6 +94,10 @@
   ((transport agent-shell-to-go-test-transport) _token &optional _options)
   (agent-shell-to-go-test--record transport 'acknowledge-interaction))
 
+(cl-defmethod agent-shell-to-go-transport-followup-interaction
+  ((transport agent-shell-to-go-test-transport) _token text)
+  (agent-shell-to-go-test--record transport 'followup-interaction text))
+
 (cl-defmethod agent-shell-to-go-transport-get-message-text
   ((transport agent-shell-to-go-test-transport) _channel message-id)
   (gethash message-id (agent-shell-to-go-test-transport-messages transport)))

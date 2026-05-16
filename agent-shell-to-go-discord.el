@@ -134,12 +134,17 @@ EXTRA-CURL-ARGS are appended after the base headers (body flags, form fields, et
 Returns the parsed JSON response or nil."
   (let* ((url (concat agent-shell-to-go--discord-api-base endpoint))
          (token agent-shell-to-go-discord-bot-token)
-         (args (append
-                (list "-s" "-X" method
-                      "-H" (concat "Authorization: Bot " token)
-                      "-H" "User-Agent: DiscordBot (agent-shell-to-go, 0.3.1)")
-                extra-curl-args
-                (list url))))
+         (args
+          (append
+           (list
+            "-s"
+            "-X"
+            method
+            "-H"
+            (concat "Authorization: Bot " token)
+            "-H"
+            "User-Agent: DiscordBot (agent-shell-to-go, 0.3.1)")
+           extra-curl-args (list url))))
     (with-temp-buffer
       (apply #'call-process "curl" nil t nil args)
       (goto-char (point-min))
@@ -155,16 +160,20 @@ Returns the parsed JSON response or nil."
   (agent-shell-to-go--discord-request
    method endpoint
    (when data
-     (list "-H" "Content-Type: application/json"
-           "-d" (encode-coding-string (json-encode data) 'utf-8)))))
+     (list
+      "-H"
+      "Content-Type: application/json"
+      "-d"
+      (encode-coding-string (json-encode data) 'utf-8)))))
 
 (defun agent-shell-to-go--discord-api-upload (channel-id path &optional comment)
   "Upload PATH as a file attachment to Discord CHANNEL-ID with optional COMMENT."
   (let* ((filename (file-name-nondirectory path))
-         (extra (append
-                 (list "-F" (format "files[0]=@%s;filename=%s" path filename))
-                 (when (and comment (not (string-empty-p comment)))
-                   (list "-F" (format "content=%s" comment))))))
+         (extra
+          (append
+           (list "-F" (format "files[0]=@%s;filename=%s" path filename))
+           (when (and comment (not (string-empty-p comment)))
+             (list "-F" (format "content=%s" comment))))))
     (agent-shell-to-go--discord-request
      "POST" (format "/channels/%s/messages" channel-id) extra)))
 
@@ -411,6 +420,19 @@ INTERACTION-TOKEN must be \"{interaction-id}:{token}\"."
                                               interaction-id
                                               token)
                                       `((type . ,response-type))))))
+
+(cl-defmethod agent-shell-to-go-transport-followup-interaction
+    ((transport agent-shell-to-go-discord-transport) interaction-token text)
+  "Edit the deferred interaction response via the Discord webhook API.
+INTERACTION-TOKEN must be \"{interaction-id}:{token}\"."
+  (when (and interaction-token (string-match-p ":" interaction-token))
+    (let* ((colon (string-search ":" interaction-token))
+           (token (substring interaction-token (1+ colon)))
+           (app-id (agent-shell-to-go-transport-bot-user-id transport))
+           (safe (agent-shell-to-go--discord-truncate-content text)))
+      (agent-shell-to-go--discord-api
+       "PATCH" (format "/webhooks/%s/%s/messages/@original" app-id token)
+       `((content . ,safe))))))
 
 (cl-defmethod agent-shell-to-go-transport-get-message-text
     ((transport agent-shell-to-go-discord-transport) channel-id message-id)
@@ -662,10 +684,11 @@ CHANNEL-ID must be a forum channel; LABEL becomes the post title."
            "discord gateway: invalid session, re-identifying in 5s")
           (run-with-timer 5 nil #'agent-shell-to-go--discord-send-identify transport))
          ((= op agent-shell-to-go--discord-op-dispatch)
-          (agent-shell-to-go--defer #'agent-shell-to-go--discord-dispatch-event
-                                    transport
-                                    (format "%s" t-event)
-                                    d)))))))
+          (agent-shell-to-go--defer
+           #'agent-shell-to-go--discord-dispatch-event
+           transport
+           (format "%s" t-event)
+           d)))))))
 
 ; Event dispatch 
 
@@ -714,17 +737,21 @@ thread-parents cache (e.g. after an Emacs restart)."
       ;; Cache miss: ask Discord whether this channel is a thread (type 11).
       ;; Thread channels have a parent_id pointing to the forum channel.
       (condition-case nil
-          (let* ((resp      (agent-shell-to-go--discord-api
-                             "GET" (format "/channels/%s" channel-id)))
-                 (type      (map-elt resp 'type))
+          (let* ((resp
+                  (agent-shell-to-go--discord-api
+                   "GET" (format "/channels/%s" channel-id)))
+                 (type (map-elt resp 'type))
                  (parent-id (map-elt resp 'parent_id)))
             (if (and parent-id (= type 11))
                 (progn
-                  (puthash channel-id parent-id
-                           (agent-shell-to-go-discord-transport-thread-parents transport))
+                  (puthash
+                   channel-id
+                   parent-id
+                   (agent-shell-to-go-discord-transport-thread-parents transport))
                   (cons parent-id channel-id))
               (cons channel-id nil)))
-        (error (cons channel-id nil))))))
+        (error
+         (cons channel-id nil))))))
 
 (defun agent-shell-to-go--discord-normalize-message (transport data)
   "Normalize a Discord MESSAGE_CREATE payload and fire the message hook."
@@ -872,7 +899,27 @@ Must be called once after initial bot setup or command changes."
                 (required . :json-true))]))
             ((name . "projects")
              (description . "List active agent-shell projects")
-             (type . 1))]))
+             (type . 1))
+            ((name . "sessions")
+             (description . "List saved sessions for a project") (type . 1)
+             (options
+              .
+              [((name . "project-name")
+                (description
+                 . "Project name (optional if in a project channel)")
+                (type . 3) (required . :json-false))]))
+            ((name . "resume")
+             (description . "Resume a saved session") (type . 1)
+             (options
+              .
+              [((name . "session")
+                (description
+                 . "Session number from /sessions (default: 1)")
+                (type . 3) (required . :json-false))
+               ((name . "project-name")
+                (description
+                 . "Project name (optional if in a project channel)")
+                (type . 3) (required . :json-false))]))]))
     (agent-shell-to-go--discord-api "PUT" endpoint commands)
     (agent-shell-to-go--debug
      "Discord commands registered (%s)"

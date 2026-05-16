@@ -385,12 +385,15 @@ Presentation reactions are handled by the main dispatcher registered first."
                              :test #'equal))))))))
 
 (cl-defun agent-shell-to-go--bridge-on-slash-command
-    (&key transport command args channel-id &allow-other-keys)
+    (&key transport command args channel-id interaction-token &allow-other-keys)
   "Handle an inbound slash command from a transport."
   (let* ((typed-args args)
          (reply
           (lambda (text)
-            (agent-shell-to-go-transport-send-text transport channel-id nil text))))
+            (if interaction-token
+                (agent-shell-to-go-transport-followup-interaction
+                 transport interaction-token text)
+              (agent-shell-to-go-transport-send-text transport channel-id nil text)))))
     (pcase command
       ("/new-agent" (let* ((explicit-folder (map-elt typed-args :folder))
               (folder
@@ -398,7 +401,7 @@ Presentation reactions are handled by the main dispatcher registered first."
                 (or explicit-folder agent-shell-to-go-default-folder))))
          (unless explicit-folder
            (make-directory folder t))
-         (agent-shell-to-go--start-agent-in-folder folder transport channel-id)))
+         (agent-shell-to-go--start-agent-in-folder folder transport reply)))
       ("/new-project" (let ((project-name (map-elt typed-args :project-name)))
          (if (not project-name)
              (funcall reply "Usage: `/new-project <project-name>`")
@@ -411,7 +414,7 @@ Presentation reactions are handled by the main dispatcher registered first."
                       (lambda (final-dir)
                         (funcall reply "Starting Claude Code…")
                         (agent-shell-to-go--start-agent-in-folder
-                         final-dir transport channel-id))))
+                         final-dir transport reply))))
                  (if agent-shell-to-go-new-project-function
                      (funcall agent-shell-to-go-new-project-function
                               project-name
@@ -473,32 +476,33 @@ Presentation reactions are handled by the main dispatcher registered first."
                   (agent-shell-to-go--do-resume transport reply project-path fetched n))
                 reply)))))))))
 
-(defun agent-shell-to-go--start-agent-in-folder (folder transport channel-id)
-  "Start an agent in FOLDER, notify CHANNEL-ID via TRANSPORT.
-Enables `agent-shell-to-go-mode' on the new buffer so it is immediately
-accessible from remote via TRANSPORT and CHANNEL-ID."
+(defun agent-shell-to-go--start-agent-in-folder (folder transport reply)
+  "Start an agent in FOLDER and call REPLY with a status message.
+REPLY is a one-argument function that delivers the message back to
+wherever the slash command originated."
   (agent-shell-to-go--debug "starting agent in %s" folder)
   (if (file-directory-p folder)
       (let ((default-directory folder))
         (save-window-excursion
           (condition-case err
               (let ((bufs-before (agent-shell-buffers)))
+                ;; Omit :channel-id so bridge-enable derives the correct project
+                ;; channel via ensure-project-channel, regardless of which
+                ;; channel the slash command was invoked from.
                 (setq agent-shell-to-go--inherit-state
-                      (list :transport transport :channel-id channel-id))
+                      (list :transport transport))
                 (funcall agent-shell-to-go-start-agent-function)
                 (when-let* ((new-buf
                              (cl-find-if
                               (lambda (b) (not (memq b bufs-before)))
                               (agent-shell-buffers))))
                   (with-current-buffer new-buf
-                    (agent-shell-to-go-mode 1)))
-                (agent-shell-to-go-transport-send-text
-                 transport channel-id nil (format "Agent started in `%s`" folder)))
+                    (agent-shell-to-go-mode 1))
+                  (funcall reply (format "Agent started in `%s`" folder))))
             (error
              (setq agent-shell-to-go--inherit-state nil)
              (agent-shell-to-go--debug "error starting agent: %s" err)))))
-    (agent-shell-to-go-transport-send-text
-     transport channel-id nil (format "Folder does not exist: `%s`" folder))))
+    (funcall reply (format "Folder does not exist: `%s`" folder))))
 
 ; /sessions and /resume helpers
 

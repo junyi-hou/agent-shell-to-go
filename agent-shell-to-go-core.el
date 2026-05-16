@@ -209,6 +209,13 @@ Returns non-nil if the edit succeeded.")
 Required on Discord for the 3-second interaction rule; no-op on Slack.
 OPTIONS may include :ephemeral or :deferred.")
 
+(cl-defgeneric agent-shell-to-go-transport-followup-interaction
+    (transport interaction-token text)
+  "Edit the deferred response for INTERACTION-TOKEN on TRANSPORT to TEXT.
+Called after a type-5 ack to resolve the pending interaction.
+No-op when INTERACTION-TOKEN is nil or unsupported by the transport."
+  nil)
+
 ;; Read
 
 (cl-defgeneric agent-shell-to-go-transport-get-message-text
