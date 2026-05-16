@@ -704,13 +704,27 @@ CHANNEL-ID must be a forum channel; LABEL becomes the post title."
 (defun agent-shell-to-go--discord-resolve-channel (transport channel-id)
   "Return (parent-channel-id . thread-channel-id-or-nil) for CHANNEL-ID.
 If CHANNEL-ID is a forum post we created, returns its parent forum channel.
-Otherwise treats CHANNEL-ID as a top-level channel with no thread."
+Falls back to a Discord API lookup when the channel is not in the local
+thread-parents cache (e.g. after an Emacs restart)."
   (let ((parent
          (gethash
           channel-id (agent-shell-to-go-discord-transport-thread-parents transport))))
     (if parent
         (cons parent channel-id)
-      (cons channel-id nil))))
+      ;; Cache miss: ask Discord whether this channel is a thread (type 11).
+      ;; Thread channels have a parent_id pointing to the forum channel.
+      (condition-case nil
+          (let* ((resp      (agent-shell-to-go--discord-api
+                             "GET" (format "/channels/%s" channel-id)))
+                 (type      (map-elt resp 'type))
+                 (parent-id (map-elt resp 'parent_id)))
+            (if (and parent-id (= type 11))
+                (progn
+                  (puthash channel-id parent-id
+                           (agent-shell-to-go-discord-transport-thread-parents transport))
+                  (cons parent-id channel-id))
+              (cons channel-id nil)))
+        (error (cons channel-id nil))))))
 
 (defun agent-shell-to-go--discord-normalize-message (transport data)
   "Normalize a Discord MESSAGE_CREATE payload and fire the message hook."

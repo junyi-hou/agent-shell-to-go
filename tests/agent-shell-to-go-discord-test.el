@@ -265,6 +265,30 @@ RESPONSES is an alist keyed by (METHOD . ENDPOINT); unmatched calls return nil."
       (should (equal "FORUM1" (car result)))
       (should (equal "THREAD1" (cdr result))))))
 
+(ert-deftest agent-shell-to-go-test-discord-resolve-channel-api-fallback-thread ()
+  "A thread not in thread-parents falls back to the API and resolves as (parent . thread)."
+  (let ((tr (agent-shell-to-go-test-discord--make)))
+    (with-mocked-discord-api
+        (list (cons '("GET" . "/channels/THREAD1")
+                    '((type . 11) (parent_id . "FORUM1"))))
+      (let ((result (agent-shell-to-go--discord-resolve-channel tr "THREAD1")))
+        (should (equal "FORUM1" (car result)))
+        (should (equal "THREAD1" (cdr result)))
+        ;; Result should be cached in thread-parents for subsequent calls
+        (should (equal "FORUM1"
+                       (gethash "THREAD1"
+                                (agent-shell-to-go-discord-transport-thread-parents tr))))))))
+
+(ert-deftest agent-shell-to-go-test-discord-resolve-channel-api-fallback-non-thread ()
+  "A non-thread channel not in thread-parents falls back to the API and resolves as (channel . nil)."
+  (let ((tr (agent-shell-to-go-test-discord--make)))
+    (with-mocked-discord-api
+        (list (cons '("GET" . "/channels/CHAN1")
+                    '((type . 0) (parent_id . nil))))
+      (let ((result (agent-shell-to-go--discord-resolve-channel tr "CHAN1")))
+        (should (equal "CHAN1" (car result)))
+        (should (null (cdr result)))))))
+
 ;; Authorization
 
 (ert-deftest agent-shell-to-go-test-discord-authorized-in-list ()
