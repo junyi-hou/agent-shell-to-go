@@ -883,7 +883,7 @@ notice is sent via init-finished once the ACP handshake completes."
             (make-directory (expand-file-name "alpha" tmpdir))
             (make-directory (expand-file-name "beta" tmpdir))
             (make-directory (expand-file-name ".hidden" tmpdir))
-            (agent-shell-to-go-test-inbound-slash-command tr channel "/project")
+            (agent-shell-to-go-test-inbound-slash-command tr channel "/projects")
             (let ((texts (agent-shell-to-go-test-bridge--sent-texts tr)))
               (should (cl-some (lambda (t) (string-match-p "alpha" t)) texts))
               (should (cl-some (lambda (t) (string-match-p "beta" t)) texts))
@@ -897,7 +897,7 @@ notice is sent via init-finished once the ACP handshake completes."
            (tmpdir (make-temp-file "ag2g-test-projects-empty" t)))
       (unwind-protect
           (let ((agent-shell-to-go-projects-directory tmpdir))
-            (agent-shell-to-go-test-inbound-slash-command tr channel "/project")
+            (agent-shell-to-go-test-inbound-slash-command tr channel "/projects")
             (should
              (cl-some
               (lambda (text) (string-match-p "No projects found" text))
