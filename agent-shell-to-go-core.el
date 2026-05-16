@@ -602,7 +602,10 @@ Closes any existing socket first."
 ; Slash command arg schemas 
 
 (defconst agent-shell-to-go--slash-command-schemas
-  '(("/new-agent" (:folder string)) ("/new-project" (:project-name string)))
+  '(("/new-agent"   (:folder string))
+    ("/new-project" (:project-name string))
+    ("/sessions"    (:project-name string))
+    ("/resume"      (:session string :project-name string)))
   "Per-command arg schemas for transports that need to parse text args.
 Each entry is (COMMAND . SCHEMA).  Transports consult this when
 converting raw text to a typed args plist for the slash-command hook.")
@@ -610,12 +613,19 @@ converting raw text to a typed args plist for the slash-command hook.")
 (defun agent-shell-to-go--parse-slash-args (command text)
   "Parse TEXT into a typed args plist for COMMAND using the schema.
 Returns nil if no schema is found; the caller keeps :args-text either way.
-Each schema entry is a flat (:key type) plist; TEXT maps positionally to
-the first key (all current commands take a single optional string arg)."
+Each schema entry is a flat (:key type ...) plist.  Single-key commands
+map the whole TEXT to that key; multi-key commands split TEXT by whitespace
+and map tokens positionally."
   (when-let* ((schema (cadr (assoc command agent-shell-to-go--slash-command-schemas)))
-              (key (car schema))
-              (text (and text (string-trim text))))
-    (list key (and (not (string-empty-p text)) text))))
+              (trimmed (and text (string-trim text))))
+    (let ((keys (seq-filter #'keywordp schema)))
+      (if (= (length keys) 1)
+          (list (car keys) (and (not (string-empty-p trimmed)) trimmed))
+        (let ((tokens (and (not (string-empty-p trimmed))
+                           (split-string trimmed nil t))))
+          (cl-loop for key in keys
+                   for token in (append tokens (make-list (length keys) nil))
+                   append (list key token)))))))
 
 (provide 'agent-shell-to-go-core)
 ;;; agent-shell-to-go-core.el ends here

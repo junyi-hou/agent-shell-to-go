@@ -699,6 +699,178 @@ notice is sent via init-finished once the ACP handshake completes."
               (agent-shell-to-go-test-bridge--sent-texts tr))))
         (delete-directory existing t)))))
 
+(defmacro agent-shell-to-go-test-bridge--with-mock-acp-sessions (sessions &rest body)
+  "Evaluate BODY with `acp-send-request' mocked to call :on-success with SESSIONS."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'acp-send-request)
+              (lambda (&rest args)
+                (funcall (plist-get args :on-success)
+                         (list (cons 'sessions (vconcat ,sessions)))))))
+     ,@body))
+
+(ert-deftest agent-shell-to-go-test-bridge-slash-sessions-lists-sessions ()
+  "/sessions returns a numbered list of session titles from ACP."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
+           (tmpdir (make-temp-file "ag2g-test-sessions" t))
+           (agent-shell-to-go--session-list-cache nil))
+      (unwind-protect
+          (let ((agent-shell-to-go-projects-directory
+                 (file-name-parent-directory tmpdir)))
+            (agent-shell-to-go-test-bridge--with-mock-acp-sessions
+                (list
+                 '((sessionId . "S1")
+                   (title . "Build the thing")
+                   (updatedAt . "2024-01-01T00:00:00Z"))
+                 '((sessionId . "S2")
+                   (title . "Fix the bug")
+                   (updatedAt . "2024-01-01T00:00:00Z")))
+              (agent-shell-to-go-test-inbound-slash-command
+               tr channel "/sessions" `(:project-name ,(file-name-nondirectory tmpdir)))
+              (let ((texts (agent-shell-to-go-test-bridge--sent-texts tr)))
+                (should (cl-some (lambda (t) (string-match-p "1\\." t)) texts))
+                (should
+                 (cl-some (lambda (t) (string-match-p "Build the thing" t)) texts))
+                (should (cl-some (lambda (t) (string-match-p "2\\." t)) texts))
+                (should
+                 (cl-some (lambda (t) (string-match-p "Fix the bug" t)) texts)))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest agent-shell-to-go-test-bridge-slash-sessions-empty ()
+  "/sessions replies with no-sessions message when ACP returns an empty list."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
+           (tmpdir (make-temp-file "ag2g-test-sessions" t))
+           (agent-shell-to-go--session-list-cache nil))
+      (unwind-protect
+          (let ((agent-shell-to-go-projects-directory
+                 (file-name-parent-directory tmpdir)))
+            (agent-shell-to-go-test-bridge--with-mock-acp-sessions nil
+              (agent-shell-to-go-test-inbound-slash-command
+               tr channel "/sessions" `(:project-name ,(file-name-nondirectory tmpdir)))
+              (should
+               (cl-some
+                (lambda (text) (string-match-p "No sessions found" text))
+                (agent-shell-to-go-test-bridge--sent-texts tr)))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest agent-shell-to-go-test-bridge-slash-resume-default-first ()
+  "/resume with no index resumes the most recent (first) session."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
+           (tmpdir (make-temp-file "ag2g-test-resume" t))
+           (agent-shell-to-go--session-list-cache nil)
+           (agent-shell-to-go--inherit-state nil)
+           (resumed-id nil))
+      (unwind-protect
+          (let ((agent-shell-to-go-projects-directory
+                 (file-name-parent-directory tmpdir)))
+            (agent-shell-to-go-test-bridge--with-mock-acp-sessions
+                (list
+                 '((sessionId . "S1")
+                   (title . "First")
+                   (updatedAt . "2024-01-01T00:00:00Z"))
+                 '((sessionId . "S2")
+                   (title . "Second")
+                   (updatedAt . "2024-01-01T00:00:00Z")))
+              (cl-letf (((symbol-function 'agent-shell-resume-session)
+                         (lambda (id) (setq resumed-id id))))
+                (agent-shell-to-go-test-inbound-slash-command
+                 tr channel "/resume" `(:project-name ,(file-name-nondirectory tmpdir)))
+                (should (equal "S1" resumed-id))
+                (should
+                 (cl-some
+                  (lambda (text) (string-match-p "Resuming" text))
+                  (agent-shell-to-go-test-bridge--sent-texts tr))))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest agent-shell-to-go-test-bridge-slash-resume-nth ()
+  "/resume 2 resumes the second session in the list."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
+           (tmpdir (make-temp-file "ag2g-test-resume" t))
+           (agent-shell-to-go--session-list-cache nil)
+           (agent-shell-to-go--inherit-state nil)
+           (resumed-id nil))
+      (unwind-protect
+          (let ((agent-shell-to-go-projects-directory
+                 (file-name-parent-directory tmpdir)))
+            (agent-shell-to-go-test-bridge--with-mock-acp-sessions
+                (list
+                 '((sessionId . "S1")
+                   (title . "First")
+                   (updatedAt . "2024-01-01T00:00:00Z"))
+                 '((sessionId . "S2")
+                   (title . "Second")
+                   (updatedAt . "2024-01-01T00:00:00Z")))
+              (cl-letf (((symbol-function 'agent-shell-resume-session)
+                         (lambda (id) (setq resumed-id id))))
+                (agent-shell-to-go-test-inbound-slash-command
+                 tr
+                 channel
+                 "/resume"
+                 `(:session "2" :project-name ,(file-name-nondirectory tmpdir)))
+                (should (equal "S2" resumed-id)))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest agent-shell-to-go-test-bridge-slash-resume-uses-cache ()
+  "/resume after /sessions uses the cached list without a second ACP call."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
+           (tmpdir (make-temp-file "ag2g-test-resume" t))
+           (agent-shell-to-go--session-list-cache nil)
+           (agent-shell-to-go--inherit-state nil)
+           (acp-call-count 0)
+           (resumed-id nil))
+      (unwind-protect
+          (let ((agent-shell-to-go-projects-directory
+                 (file-name-parent-directory tmpdir)))
+            (cl-letf (((symbol-function 'acp-send-request)
+                       (lambda (&rest args)
+                         (cl-incf acp-call-count)
+                         (funcall (plist-get args :on-success)
+                                  '((sessions
+                                     .
+                                     [((sessionId . "S1")
+                                       (title . "Cached")
+                                       (updatedAt . "2024-01-01T00:00:00Z"))])))))
+                      ((symbol-function 'agent-shell-resume-session)
+                       (lambda (id) (setq resumed-id id))))
+              (agent-shell-to-go-test-inbound-slash-command
+               tr channel "/sessions" `(:project-name ,(file-name-nondirectory tmpdir)))
+              (agent-shell-to-go-test-inbound-slash-command
+               tr channel "/resume" `(:project-name ,(file-name-nondirectory tmpdir)))
+              (should (equal "S1" resumed-id))
+              (should (= 1 acp-call-count))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest agent-shell-to-go-test-bridge-slash-resume-out-of-range ()
+  "/resume N where N exceeds the session count replies with an error."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
+           (tmpdir (make-temp-file "ag2g-test-resume" t))
+           (agent-shell-to-go--session-list-cache nil)
+           (agent-shell-to-go--inherit-state nil))
+      (unwind-protect
+          (let ((agent-shell-to-go-projects-directory
+                 (file-name-parent-directory tmpdir)))
+            (agent-shell-to-go-test-bridge--with-mock-acp-sessions
+                (list
+                 '((sessionId . "S1")
+                   (title . "Only one")
+                   (updatedAt . "2024-01-01T00:00:00Z")))
+              (cl-letf (((symbol-function 'agent-shell-resume-session)
+                         (lambda (_id) nil)))
+                (agent-shell-to-go-test-inbound-slash-command
+                 tr
+                 channel
+                 "/resume"
+                 `(:session "5" :project-name ,(file-name-nondirectory tmpdir)))
+                (should
+                 (cl-some
+                  (lambda (text) (string-match-p "No session #5" text))
+                  (agent-shell-to-go-test-bridge--sent-texts tr))))))
+        (delete-directory tmpdir t)))))
 
 (ert-deftest agent-shell-to-go-test-bridge-on-init-client-nil-client ()
   "When init-client fires with :client nil in agent-shell state, failure notice is sent.

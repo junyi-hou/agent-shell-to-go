@@ -31,6 +31,7 @@ Possible integrations:
     - Each agent-shell session gets its own thread within the project channel
     - Messages flow bidirectionally (Emacs <-> messaging platform)
     - Real-time updates via WebSocket
+    - Resume past sessions using `/resume`. Lists available sessions via `/sessions`.
 - **Message queuing** - messages sent while the agent is busy are queued and processed automatically
     - Permission requests with reaction-based approval
     - Mode switching via commands (`!yolo`, `!safe`, `!plan`)
@@ -158,6 +159,9 @@ Send these in the thread to control the session:
 |---------|-------------|
 | `/new-project <name>` | Create a new project folder and start an agent |
 | `/new-agent [folder]` | Start a new agent |
+| `/project` | List projects (immeidate subdirectories) under `agent-shell-to-go-projects-directory` |
+| `/sessions [proj-name]` | List past sessions for a project, infer from the current channel if proj-name is not given |
+| `/resume [N] [proj-name]` | Resume the Nth session (default: most recent) of proj-name |
 
 See each transport's setup doc for how to register slash commands.
 

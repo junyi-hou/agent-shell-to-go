@@ -82,6 +82,10 @@ Value: plist with :respond :options")
   "Plist of transport state for bridge-enable to inherit on a restarted session.
 Keys: :transport :channel-id :thread-id.  Consumed (set to nil) on first use.")
 
+(defvar agent-shell-to-go--session-list-cache nil
+  "Alist mapping project-path strings to cached ACP session data.
+Each entry: (PATH . (:sessions LIST :project-path PATH)).")
+
 ; Buffer lookup 
 
 (defun agent-shell-to-go--bridge-active-buffers ()
@@ -389,9 +393,11 @@ Presentation reactions are handled by the main dispatcher registered first."
             (agent-shell-to-go-transport-send-text transport channel-id nil text))))
     (pcase command
       ("/new-agent" (let* ((explicit-folder (map-elt typed-args :folder))
-                          (folder (expand-file-name
-                                   (or explicit-folder agent-shell-to-go-default-folder))))
-         (unless explicit-folder (make-directory folder t))
+              (folder
+               (expand-file-name
+                (or explicit-folder agent-shell-to-go-default-folder))))
+         (unless explicit-folder
+           (make-directory folder t))
          (agent-shell-to-go--start-agent-in-folder folder transport channel-id)))
       ("/new-project" (let ((project-name (map-elt typed-args :project-name)))
          (if (not project-name)
@@ -413,7 +419,44 @@ Presentation reactions are handled by the main dispatcher registered first."
                               start-fn)
                    (make-directory project-dir t)
                    (funcall start-fn project-dir))))))))
-)))
+      ("/sessions" (let* ((proj-name (map-elt typed-args :project-name))
+              (project-path
+               (if proj-name
+                   (expand-file-name proj-name agent-shell-to-go-projects-directory)
+                 (agent-shell-to-go--resolve-project-from-channel channel-id))))
+         (if (not project-path)
+             (funcall reply "Cannot determine project. Use `/sessions <proj-name>`.")
+           (agent-shell-to-go--fetch-sessions
+            project-path
+            (lambda (sessions)
+              (funcall reply
+                       (agent-shell-to-go--format-session-list project-path sessions)))
+            reply))))
+      ("/resume" (let* ((session-arg (map-elt typed-args :session))
+              (proj-name (map-elt typed-args :project-name))
+              (n
+               (if session-arg
+                   (max 1 (string-to-number session-arg))
+                 1))
+              (project-path
+               (if proj-name
+                   (expand-file-name proj-name agent-shell-to-go-projects-directory)
+                 (agent-shell-to-go--resolve-project-from-channel channel-id))))
+         (if (not project-path)
+             (funcall reply "Cannot determine project. Use `/resume [N] <proj-name>`.")
+           (let* ((cached
+                   (alist-get project-path agent-shell-to-go--session-list-cache
+                              nil
+                              nil
+                              #'equal))
+                  (sessions (map-elt cached :sessions)))
+             (if sessions
+                 (agent-shell-to-go--do-resume transport reply project-path sessions n)
+               (agent-shell-to-go--fetch-sessions
+                project-path
+                (lambda (fetched)
+                  (agent-shell-to-go--do-resume transport reply project-path fetched n))
+                reply)))))))))
 
 (defun agent-shell-to-go--start-agent-in-folder (folder transport channel-id)
   "Start an agent in FOLDER, notify CHANNEL-ID via TRANSPORT.
@@ -429,8 +472,9 @@ accessible from remote via TRANSPORT and CHANNEL-ID."
                       (list :transport transport :channel-id channel-id))
                 (funcall agent-shell-to-go-start-agent-function)
                 (when-let* ((new-buf
-                             (cl-find-if (lambda (b) (not (memq b bufs-before)))
-                                         (agent-shell-buffers))))
+                             (cl-find-if
+                              (lambda (b) (not (memq b bufs-before)))
+                              (agent-shell-buffers))))
                   (with-current-buffer new-buf
                     (agent-shell-to-go-mode 1)))
                 (agent-shell-to-go-transport-send-text
@@ -441,7 +485,118 @@ accessible from remote via TRANSPORT and CHANNEL-ID."
     (agent-shell-to-go-transport-send-text
      transport channel-id nil (format "Folder does not exist: `%s`" folder))))
 
-; agent shell subscriptions 
+; /sessions and /resume helpers
+
+(defun agent-shell-to-go--resolve-project-from-channel (channel-id)
+  "Return project path for CHANNEL-ID by scanning active buffers."
+  (when-let* ((buf
+               (cl-find-if
+                (lambda (b)
+                  (and (buffer-live-p b)
+                       (equal
+                        channel-id
+                        (buffer-local-value 'agent-shell-to-go--channel-id b))))
+                agent-shell-to-go--active-buffers)))
+    (expand-file-name (buffer-local-value 'default-directory buf))))
+
+(defun agent-shell-to-go--format-session-age (updated-at)
+  "Format UPDATED-AT (ISO 8601 string or epoch number) as a relative age."
+  (condition-case nil
+      (let* ((epoch
+              (cond
+               ((stringp updated-at)
+                (float-time (date-to-time updated-at)))
+               ((numberp updated-at)
+                (float updated-at))
+               (t
+                (float-time updated-at))))
+             (age (max 0 (- (float-time) epoch)))
+             (mins (floor (/ age 60)))
+             (hours (floor (/ age 3600)))
+             (days (floor (/ age 86400))))
+        (cond
+         ((< age 3600)
+          (format "%dm ago" (max 1 mins)))
+         ((< age 86400)
+          (format "%dh ago" hours))
+         ((< age 604800)
+          (format "%dd ago" days))
+         (t
+          (format "%dwk ago" (floor (/ days 7))))))
+    (error
+     "unknown")))
+
+(defun agent-shell-to-go--format-session-list (project-path sessions)
+  "Format SESSIONS for PROJECT-PATH as a reply string."
+  (let ((name (file-name-nondirectory (directory-file-name project-path))))
+    (if (null sessions)
+        (format "No sessions found for *%s*." name)
+      (string-join (cons
+                    (format "Sessions for *%s*:" name)
+                    (cl-loop
+                     for session in sessions for i from 1 collect
+                     (format "%d. %s  · %s"
+                             i (or (map-elt session 'title) "Untitled")
+                             (agent-shell-to-go--format-session-age
+                              (map-elt session 'updatedAt)))))
+                   "\n"))))
+
+(defun agent-shell-to-go--fetch-sessions (project-path on-success on-failure)
+  "Fetch ACP sessions for PROJECT-PATH asynchronously.
+Calls ON-SUCCESS with the session list or ON-FAILURE with an error string.
+Updates `agent-shell-to-go--session-list-cache' on success."
+  (let ((ref-buf (cl-find-if #'buffer-live-p agent-shell-to-go--active-buffers)))
+    (if (not ref-buf)
+        (funcall on-failure "No active session found.")
+      (with-current-buffer ref-buf
+        (let ((client (map-elt agent-shell--state :client))
+              (cwd (agent-shell--resolve-path project-path)))
+          (if (not client)
+              (funcall on-failure "No active ACP client.")
+            (acp-send-request
+             :client client
+             :request (acp-make-session-list-request :cwd cwd)
+             :buffer ref-buf
+             :on-success
+             (lambda (resp)
+               (let ((sessions (append (or (map-elt resp 'sessions) '()) nil)))
+                 (setf (alist-get project-path agent-shell-to-go--session-list-cache
+                                  nil
+                                  nil
+                                  #'equal)
+                       (list :sessions sessions :project-path project-path))
+                 (funcall on-success sessions)))
+             :on-failure
+             (lambda (_err _raw)
+               (funcall on-failure "Failed to fetch session list.")))))))))
+
+(defun agent-shell-to-go--do-resume (transport reply project-path sessions n)
+  "Resume the Nth entry in SESSIONS for PROJECT-PATH, notifying via REPLY."
+  (let* ((session (nth (1- n) sessions))
+         (sess-id (and session (map-elt session 'sessionId)))
+         (title (and session (or (map-elt session 'title) "Untitled"))))
+    (if (not sess-id)
+        (funcall reply
+                 (format "No session #%d. Run `/sessions` to list available sessions."
+                         n))
+      (funcall reply (format "Resuming: _%s_…" title))
+      (save-window-excursion
+        (condition-case err
+            (let ((bufs-before (agent-shell-buffers)))
+              (setq agent-shell-to-go--inherit-state (list :transport transport))
+              (let ((default-directory (expand-file-name project-path)))
+                (agent-shell-resume-session sess-id))
+              (when-let* ((new-buf
+                           (cl-find-if
+                            (lambda (b) (not (memq b bufs-before)))
+                            (agent-shell-buffers))))
+                (with-current-buffer new-buf
+                  (agent-shell-to-go-mode 1))))
+          (error
+           (setq agent-shell-to-go--inherit-state nil)
+           (funcall reply (format "Failed to resume: %s" err))))))))
+
+; agent shell subscriptions
 
 ;; TODO: use the new session-title-changed event
 ;; This needs a more recent `agent-shell'
