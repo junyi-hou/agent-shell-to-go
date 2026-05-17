@@ -27,7 +27,6 @@
 ;;   3. Invite bot with scopes: bot, applications.commands
 ;;   4. Permissions: Send Messages, Read Message History, Manage Channels,
 ;;                   Add Reactions, Manage Messages, Manage Threads
-;;   5. Run `M-x agent-shell-to-go-discord-register-commands' once
 
 ;;; Code:
 
@@ -398,42 +397,6 @@ Options plist supports :truncate."
   (when (and path (file-exists-p path))
     (agent-shell-to-go--discord-api-upload (or thread-id channel-id) path comment)))
 
-(cl-defmethod agent-shell-to-go-transport-acknowledge-interaction
-    ((transport agent-shell-to-go-discord-transport)
-     interaction-token
-     &optional
-     options)
-  "Acknowledge a Discord interaction within the 3-second window.
-INTERACTION-TOKEN must be \"{interaction-id}:{token}\"."
-  (when (and interaction-token (string-match-p ":" interaction-token))
-    (let* ((colon (string-search ":" interaction-token))
-           (interaction-id (substring interaction-token 0 colon))
-           (token (substring interaction-token (1+ colon)))
-           ;; Type 5 = DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE (think then reply)
-           ;; Type 4 = CHANNEL_MESSAGE_WITH_SOURCE (reply immediately with content)
-           (response-type
-            (if (map-elt options :deferred)
-                5
-              4)))
-      (agent-shell-to-go--discord-api "POST"
-                                      (format "/interactions/%s/%s/callback"
-                                              interaction-id
-                                              token)
-                                      `((type . ,response-type))))))
-
-(cl-defmethod agent-shell-to-go-transport-followup-interaction
-    ((transport agent-shell-to-go-discord-transport) interaction-token text)
-  "Edit the deferred interaction response via the Discord webhook API.
-INTERACTION-TOKEN must be \"{interaction-id}:{token}\"."
-  (when (and interaction-token (string-match-p ":" interaction-token))
-    (let* ((colon (string-search ":" interaction-token))
-           (token (substring interaction-token (1+ colon)))
-           (app-id (agent-shell-to-go-transport-bot-user-id transport))
-           (safe (agent-shell-to-go--discord-truncate-content text)))
-      (agent-shell-to-go--discord-api
-       "PATCH" (format "/webhooks/%s/%s/messages/@original" app-id token)
-       `((content . ,safe))))))
-
 (cl-defmethod agent-shell-to-go-transport-get-message-text
     ((transport agent-shell-to-go-discord-transport) channel-id message-id)
   "Fetch the content of MESSAGE-ID from Discord CHANNEL-ID."
@@ -720,9 +683,7 @@ CHANNEL-ID must be a forum channel; LABEL becomes the post title."
     ("MESSAGE_REACTION_ADD"
      (agent-shell-to-go--discord-normalize-reaction transport data t))
     ("MESSAGE_REACTION_REMOVE"
-     (agent-shell-to-go--discord-normalize-reaction transport data nil))
-    ("INTERACTION_CREATE"
-     (agent-shell-to-go--discord-normalize-interaction transport data))))
+     (agent-shell-to-go--discord-normalize-reaction transport data nil))))
 
 (defun agent-shell-to-go--discord-resolve-channel (transport channel-id)
   "Return (parent-channel-id . thread-channel-id-or-nil) for CHANNEL-ID.
@@ -813,119 +774,6 @@ ADDED-P is t for MESSAGE_REACTION_ADD, nil for MESSAGE_REACTION_REMOVE."
                   :action action
                   :raw-emoji emoji-name
                   :added-p added-p)))))))
-
-(defun agent-shell-to-go--discord-normalize-interaction (transport data)
-  "Normalize a Discord INTERACTION_CREATE payload and fire the slash command hook."
-  (let* ((interaction-id (map-elt data 'id))
-         (interaction-token (map-elt data 'token))
-         (interaction-type (map-elt data 'type))
-         (channel-id (map-elt data 'channel_id))
-         (member (map-elt data 'member))
-         (user (or (map-elt data 'user) (map-elt member 'user)))
-         (user-id (map-elt user 'id))
-         (cmd-data (map-elt data 'data))
-         (command-name
-          (when cmd-data
-            (concat "/" (map-elt cmd-data 'name))))
-         (options
-          (when cmd-data
-            (append (map-elt cmd-data 'options) nil)))
-         (combined-token (format "%s:%s" interaction-id interaction-token)))
-    ;; type 2 = APPLICATION_COMMAND
-    (when (= (or interaction-type 0) 2)
-      (agent-shell-to-go--debug "discord slash: %s user=%s" command-name user-id)
-      ;; Acknowledge immediately to satisfy the 3-second window
-      (agent-shell-to-go-transport-acknowledge-interaction
-       transport combined-token '(:deferred t))
-      (when (agent-shell-to-go-transport-authorized-p transport user-id)
-        (let* ((args-text
-                (mapconcat (lambda (opt)
-                             (let ((v (map-elt opt 'value)))
-                               (if v
-                                   (format "%s" v)
-                                 "")))
-                           options
-                           " "))
-               (args (agent-shell-to-go--parse-slash-args command-name args-text))
-               (resolved
-                (agent-shell-to-go--discord-resolve-channel transport channel-id))
-               (hook-channel (car resolved)))
-          (apply #'run-hook-with-args
-                 'agent-shell-to-go-slash-command-hook
-                 (list
-                  :transport transport
-                  :command command-name
-                  :args args
-                  :args-text args-text
-                  :channel-id hook-channel
-                  :user user-id
-                  :interaction-token combined-token)))))))
-
-; Application Command registration 
-
-;;;###autoload
-(defun agent-shell-to-go-discord-register-commands (&optional guild-id)
-  "Register Discord slash commands for the agent-shell-to-go bot.
-Uses GUILD-ID or `agent-shell-to-go-discord-guild-id' for guild-scoped
-commands (active immediately).  Without a guild ID, commands are global
-(may take up to 1 hour to propagate).
-Must be called once after initial bot setup or command changes."
-  (interactive)
-  (unless agent-shell-to-go-discord-bot-token
-    (error "agent-shell-to-go-discord-bot-token not set"))
-  (let* ((gid (or guild-id agent-shell-to-go-discord-guild-id))
-         (transport (agent-shell-to-go-discord-get-or-create))
-         (app-id (agent-shell-to-go-transport-bot-user-id transport))
-         (endpoint
-          (if gid
-              (format "/applications/%s/guilds/%s/commands" app-id gid)
-            (format "/applications/%s/commands" app-id)))
-         (commands
-          `[((name . "new-agent")
-             (description . "Start a new agent-shell session") (type . 1)
-             (options
-              .
-              [((name . "folder")
-                (description . "Working directory (optional)")
-                (type . 3)
-                (required . :json-false))]))
-            ((name . "new-project")
-             (description . "Create a new project and start an agent") (type . 1)
-             (options
-              .
-              [((name . "project-name")
-                (description . "Name of the new project")
-                (type . 3)
-                (required . :json-true))]))
-            ((name . "projects")
-             (description . "List active agent-shell projects")
-             (type . 1))
-            ((name . "sessions")
-             (description . "List saved sessions for a project") (type . 1)
-             (options
-              .
-              [((name . "project-name")
-                (description
-                 . "Project name (optional if in a project channel)")
-                (type . 3) (required . :json-false))]))
-            ((name . "resume")
-             (description . "Resume a saved session") (type . 1)
-             (options
-              .
-              [((name . "session")
-                (description
-                 . "Session number from /sessions (default: 1)")
-                (type . 3) (required . :json-false))
-               ((name . "project-name")
-                (description
-                 . "Project name (optional if in a project channel)")
-                (type . 3) (required . :json-false))]))]))
-    (agent-shell-to-go--discord-api "PUT" endpoint commands)
-    (agent-shell-to-go--debug
-     "Discord commands registered (%s)"
-     (if gid
-         "guild-scoped"
-       "global"))))
 
 ; Registration 
 

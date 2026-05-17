@@ -90,14 +90,6 @@
   (agent-shell-to-go-test--record transport 'upload-file channel thread-id path comment)
   (agent-shell-to-go-test--next-id transport))
 
-(cl-defmethod agent-shell-to-go-transport-acknowledge-interaction
-  ((transport agent-shell-to-go-test-transport) _token &optional _options)
-  (agent-shell-to-go-test--record transport 'acknowledge-interaction))
-
-(cl-defmethod agent-shell-to-go-transport-followup-interaction
-  ((transport agent-shell-to-go-test-transport) _token text)
-  (agent-shell-to-go-test--record transport 'followup-interaction text))
-
 (cl-defmethod agent-shell-to-go-transport-get-message-text
   ((transport agent-shell-to-go-test-transport) _channel message-id)
   (gethash message-id (agent-shell-to-go-test-transport-messages transport)))
@@ -187,19 +179,6 @@
                :action action
                :raw-emoji (symbol-name action)
                :added-p added-p)))
-
-(defun agent-shell-to-go-test-inbound-slash-command
-    (transport channel command &optional args)
-  "Fire a slash-command inbound event on TRANSPORT."
-  (apply #'run-hook-with-args
-         'agent-shell-to-go-slash-command-hook
-         (list :transport transport
-               :channel-id channel
-               :command command
-               :args (or args '())
-               :args-text ""
-               :user "testuser"
-               :interaction-token nil)))
 
 (defun agent-shell-to-go-test-outbound-calls (transport &optional method)
   "Return recorded calls on TRANSPORT, optionally filtered by METHOD."

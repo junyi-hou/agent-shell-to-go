@@ -37,42 +37,32 @@
 ;;   agent-shell-to-go--bridge-on-reaction
 ;;     - permission-allow: permission-allow clears pending entry
 ;;     - permission-reject: permission-reject clears pending entry
-;;   agent-shell-to-go--handle-command
+;;   agent-shell-to-go--dispatch / agent-shell-to-go--commands
 ;;     - help-command: !help command response
 ;;     - info-command: !info command response
-;;     - yolo-command: !yolo sets bypassPermissions mode
-;;     - bypass-command: !bypass alias for !yolo
-;;     - safe-command: !safe sets acceptEdits mode
-;;     - accept-command: !accept alias for !safe
-;;     - acceptedits-command: !acceptedits alias for !safe
-;;     - plan-command: !plan sets plan mode
-;;     - planmode-command: !planmode alias for !plan
+;;     - bypass-permissions command (!yolo, !bypass): sets bypassPermissions mode
+;;     - accept-edits command (!safe, !accept, !acceptedits): sets acceptEdits mode
+;;     - plan command (!plan, !planmode): sets plan mode
 ;;     - mode-command: !mode returns current mode name
 ;;     - stop-command: !stop interrupts a long-running agent
 ;;     - restart-command: !restart synchronously kills buffer, spawns new one with mode re-enabled
-;;   agent-shell-to-go--bridge-on-slash-command
-;;     - slash-new-agent-nonexistent-folder: /new-agent with missing folder replies with error
-;;     - slash-new-agent-success: /new-agent with valid folder starts agent and confirms
-;;     - slash-new-agent-interaction-token: /new-agent with token routes via followup-interaction
-;;     - slash-new-agent-default-folder: /new-agent with no :folder uses default-folder
-;;     - slash-new-project-missing-arg: /new-project with no project-name replies with usage
-;;     - slash-new-project-existing-dir: /new-project with existing dir replies with error
-;;     - slash-new-project-success: /new-project creates dir and sends all confirmations
-;;     - slash-sessions-lists-sessions: /sessions returns numbered list from ACP
-;;     - slash-sessions-empty: /sessions with empty ACP result replies with no-sessions
-;;     - slash-sessions-from-channel: /sessions without project-name infers from channel
-;;     - slash-sessions-no-project: /sessions on unknown channel replies cannot-determine
-;;     - slash-sessions-fetch-failure: /sessions replies with failure on ACP error
-;;     - slash-resume-default-first: /resume with no index resumes first session
-;;     - slash-resume-nth: /resume N resumes Nth session
-;;     - slash-resume-uses-cache: /resume uses cached list without second ACP call
-;;     - slash-resume-out-of-range: /resume N > count replies with error
-;;     - slash-resume-from-channel: /resume without project-name infers from channel
-;;     - slash-resume-no-project: /resume on unknown channel replies cannot-determine
-;;     - slash-resume-session-error: /resume replies with failure on resume error
-;;     - slash-project-lists-subdirs: /project lists non-hidden subdirectories
-;;     - slash-project-empty-dir: /project with empty directory replies with no-projects message
-;;     - slash-projects-nonexistent-dir: /projects with non-existent dir replies no-projects
+;;     - new-agent-unknown-project: !new-agent with unknown name replies with usage error
+;;     - new-agent-absolute-path: !new-agent with absolute path replies with usage error
+;;     - new-agent-success: !new-agent with valid project name starts agent in projects-directory/name
+;;     - new-agent-no-arg: !new-agent with no arg starts a new agent in the current project
+;;     - new-project-invalid-name: !new-project with disallowed chars replies with usage error
+;;     - new-project-missing-arg: !new-project with no arg replies with usage message
+;;     - new-project-existing-dir: !new-project with existing directory replies with error
+;;     - new-project-success: !new-project creates directory and starts agent
+;;     - resume-lists-sessions: !resume with no arg returns numbered session list
+;;     - resume-empty-sessions: !resume with no arg reports no sessions
+;;     - resume-fetch-failure: !resume with no arg reports ACP fetch failure
+;;     - resume-default-first: !resume 1 resumes first session
+;;     - resume-nth: !resume 2 resumes second session
+;;     - resume-uses-cache: !resume 1 after !resume uses cached session list
+;;     - resume-out-of-range: !resume N > count replies with error
+;;     - resume-no-project: !resume when no project resolves replies with cannot-determine
+;;     - resume-session-error: !resume 1 reports error when resume-session signals
 ;;   agent-shell-to-go--on-init-client
 ;;     - on-init-client-nil-client: failure branch when :client is nil
 ;;   agent-shell-to-go--on-error
@@ -121,11 +111,6 @@ Pumps process output each iteration.  Returns truthy on success, nil on timeout.
   "Return all text payloads sent via TRANSPORT in call order."
   (mapcar
    (lambda (c) (nth 3 c)) (agent-shell-to-go-test-outbound-calls transport 'send-text)))
-
-(defun agent-shell-to-go-test-bridge--followup-texts (transport)
-  "Return all followup-interaction payloads sent via TRANSPORT in call order."
-  (mapcar
-   (lambda (c) (nth 1 c)) (agent-shell-to-go-test-outbound-calls transport 'followup-interaction)))
 
 (defun agent-shell-to-go-test-bridge--wait-for-ready (transport &optional timeout)
   "Wait until TRANSPORT has received a Ready signal from the bridge.
@@ -399,7 +384,7 @@ Exercises the `agent-shell-to-go--remote-queued' suppression in
 
 (ert-deftest agent-shell-to-go-test-bridge-help-command ()
   "!help sends a command reference synchronously without touching agent-shell.
-Exercises `agent-shell-to-go--handle-command' via the message hook."
+Exercises `agent-shell-to-go--dispatch' via the message hook."
   (agent-shell-to-go-test-bridge--with-session tr buf
     (let ((thread-id (buffer-local-value 'agent-shell-to-go--thread-id buf))
           (channel-id (buffer-local-value 'agent-shell-to-go--channel-id buf)))
@@ -412,7 +397,7 @@ Exercises `agent-shell-to-go--handle-command' via the message hook."
 
 (ert-deftest agent-shell-to-go-test-bridge-info-command ()
   "!info sends buffer/thread/channel/session info synchronously.
-Exercises `agent-shell-to-go--handle-command' via the message hook."
+Exercises `agent-shell-to-go--dispatch' via the message hook."
   (agent-shell-to-go-test-bridge--with-session tr buf
     (let ((thread-id (buffer-local-value 'agent-shell-to-go--thread-id buf))
           (channel-id (buffer-local-value 'agent-shell-to-go--channel-id buf)))
@@ -636,115 +621,47 @@ Verifies inherit-state carries transport/channel/thread to the new buffer."
 
 ;;; init-client and error event handling
 
-;;; slash command handling
+;;; !-command handling
 
-(ert-deftest agent-shell-to-go-test-bridge-slash-new-agent-nonexistent-folder ()
-  "/new-agent with a folder that does not exist replies with an error."
+(ert-deftest agent-shell-to-go-test-bridge-command-new-agent-unknown-project ()
+  "!new-agent with a name not in projects-directory replies with a usage error."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
+           (projects-dir (make-temp-file "ag2g-test-projects" t)))
+      (unwind-protect
+          (let ((agent-shell-to-go-projects-directory projects-dir))
+            (agent-shell-to-go-test-inbound-message tr channel nil "testuser"
+             "!new-agent no-such-project")
+            (should
+             (cl-some
+              (lambda (text) (string-match-p "Usage" text))
+              (agent-shell-to-go-test-bridge--sent-texts tr))))
+        (delete-directory projects-dir t)))))
+
+(ert-deftest agent-shell-to-go-test-bridge-command-new-agent-absolute-path ()
+  "!new-agent with an absolute path replies with a usage error."
   (agent-shell-to-go-test-bridge--with-session tr buf
     (let ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf)))
-      (agent-shell-to-go-test-inbound-slash-command
-       tr channel "/new-agent" '(:folder "/nonexistent-agent-shell-to-go-test-folder"))
+      (agent-shell-to-go-test-inbound-message tr channel nil "testuser"
+       "!new-agent /tmp/some-folder")
       (should
        (cl-some
-        (lambda (text) (string-match-p "does not exist" text))
+        (lambda (text) (string-match-p "Usage" text))
         (agent-shell-to-go-test-bridge--sent-texts tr))))))
 
-(ert-deftest agent-shell-to-go-test-bridge-slash-new-agent-success ()
-  "/new-agent with a valid folder starts agent, enables mode, and is accessible from remote.
-Verifies mode is on with inherited transport/channel, and that a Connected
-notice is sent via init-finished once the ACP handshake completes."
+(ert-deftest agent-shell-to-go-test-bridge-command-new-agent-success ()
+  "!new-agent with a project name starts agent in projects-directory/name.
+Verifies bridge mode is enabled with inherited transport/channel, and that a
+Connected notice is sent via init-finished once the ACP handshake completes."
   (agent-shell-to-go-test-bridge--with-session tr buf
     (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
-           (temp-dir (make-temp-file "ag2g-test-new-agent" t))
+           (projects-dir (make-temp-file "ag2g-test-projects" t))
+           (project-name "myproject")
+           (project-dir (expand-file-name project-name projects-dir))
            (new-buf nil))
+      (make-directory project-dir)
       (unwind-protect
-          (let ((agent-shell-to-go-start-agent-function
-                 (lambda ()
-                   (let ((agent-shell-mock-agent-acp-command
-                          (list
-                           agent-shell-to-go-test-bridge--python
-                           "tests/deps/mock-acp/src/main.py"))
-                         (default-directory
-                          agent-shell-to-go-test-bridge--mock-acp-root))
-                     (setq new-buf
-                           (agent-shell-start
-                            :config (agent-shell-mock-agent-make-agent-config)))))))
-            (agent-shell-to-go-test-inbound-slash-command
-             tr channel "/new-agent" `(:folder ,temp-dir))
-            (should
-             (cl-some
-              (lambda (text) (string-match-p "Agent started in" text))
-              (agent-shell-to-go-test-bridge--sent-texts tr)))
-            (should (buffer-live-p new-buf))
-            (with-current-buffer new-buf
-              (should agent-shell-to-go-mode)
-              (should (eq agent-shell-to-go--transport tr))
-              (should (equal agent-shell-to-go--channel-id channel))
-              (should agent-shell-to-go--thread-id))
-            ;; The new session sends "_Connected_" via init-finished once the ACP
-            ;; handshake completes, signalling the agent is ready for input.
-            (should
-             (agent-shell-to-go-test-bridge--wait-until
-              (lambda ()
-                (cl-some
-                 (lambda (text) (string-match-p "Connected" text))
-                 (agent-shell-to-go-test-bridge--sent-texts tr)))
-              15)))
-        (delete-directory temp-dir t)
-        (when (and new-buf (buffer-live-p new-buf))
-          (kill-buffer new-buf))))))
-
-(ert-deftest agent-shell-to-go-test-bridge-slash-new-agent-interaction-token ()
-  "/new-agent with an interaction-token routes the confirmation via followup-interaction,
-not send-text, so the deferred Discord interaction resolves cleanly."
-  (agent-shell-to-go-test-bridge--with-session tr buf
-    (let* ((temp-dir (make-temp-file "ag2g-test-new-agent-token" t))
-           (new-buf nil))
-      (unwind-protect
-          (let ((agent-shell-to-go-start-agent-function
-                 (lambda ()
-                   (let ((agent-shell-mock-agent-acp-command
-                          (list
-                           agent-shell-to-go-test-bridge--python
-                           "tests/deps/mock-acp/src/main.py"))
-                         (default-directory
-                          agent-shell-to-go-test-bridge--mock-acp-root))
-                     (setq new-buf
-                           (agent-shell-start
-                            :config (agent-shell-mock-agent-make-agent-config)))))))
-            (apply #'run-hook-with-args
-                   'agent-shell-to-go-slash-command-hook
-                   (list :transport tr
-                         :channel-id "test-channel"
-                         :command "/new-agent"
-                         :args `(:folder ,temp-dir)
-                         :args-text ""
-                         :user "testuser"
-                         :interaction-token "fake-id:fake-token"))
-            ;; Confirmation must go through followup-interaction (resolves the interaction)
-            (should
-             (cl-some
-              (lambda (text) (string-match-p "Agent started in" text))
-              (agent-shell-to-go-test-bridge--followup-texts tr)))
-            ;; Must NOT appear in regular send-text (which would go to the forum channel)
-            (should-not
-             (cl-some
-              (lambda (text) (string-match-p "Agent started in" text))
-              (agent-shell-to-go-test-bridge--sent-texts tr))))
-        (delete-directory temp-dir t)
-        (when (and new-buf (buffer-live-p new-buf))
-          (kill-buffer new-buf))))))
-
-(ert-deftest agent-shell-to-go-test-bridge-slash-new-agent-default-folder ()
-  "/new-agent with no :folder arg auto-creates and uses agent-shell-to-go-default-folder."
-  (agent-shell-to-go-test-bridge--with-session tr buf
-    (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
-           (default-dir (expand-file-name "ag2g-test-default-folder" temporary-file-directory))
-           (new-buf nil))
-      (when (file-exists-p default-dir)
-        (delete-directory default-dir t))
-      (unwind-protect
-          (let ((agent-shell-to-go-default-folder default-dir)
+          (let ((agent-shell-to-go-projects-directory projects-dir)
                 (agent-shell-to-go-start-agent-function
                  (lambda ()
                    (let ((agent-shell-mock-agent-acp-command
@@ -756,48 +673,97 @@ not send-text, so the deferred Discord interaction resolves cleanly."
                      (setq new-buf
                            (agent-shell-start
                             :config (agent-shell-mock-agent-make-agent-config)))))))
-            (agent-shell-to-go-test-inbound-slash-command tr channel "/new-agent")
-            (should (file-directory-p default-dir))
+            (agent-shell-to-go-test-inbound-message tr channel nil "testuser"
+             (format "!new-agent %s" project-name))
             (should
              (cl-some
               (lambda (text) (string-match-p "Agent started in" text))
-              (agent-shell-to-go-test-bridge--sent-texts tr))))
-        (when (file-directory-p default-dir)
-          (delete-directory default-dir t))
+              (agent-shell-to-go-test-bridge--sent-texts tr)))
+            (should (buffer-live-p new-buf))
+            (with-current-buffer new-buf
+              (should agent-shell-to-go-mode)
+              (should (eq agent-shell-to-go--transport tr))
+              (should (equal agent-shell-to-go--channel-id channel))
+              (should agent-shell-to-go--thread-id))
+            (should
+             (agent-shell-to-go-test-bridge--wait-until
+              (lambda ()
+                (cl-some
+                 (lambda (text) (string-match-p "Connected" text))
+                 (agent-shell-to-go-test-bridge--sent-texts tr)))
+              15)))
+        (delete-directory projects-dir t)
         (when (and new-buf (buffer-live-p new-buf))
           (kill-buffer new-buf))))))
 
-(ert-deftest agent-shell-to-go-test-bridge-slash-new-project-missing-arg ()
-  "/new-project with no :project-name replies with usage message."
+
+(ert-deftest agent-shell-to-go-test-bridge-command-new-agent-no-arg ()
+  "!new-agent with no arg starts a new agent in the current project directory."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
+          (new-buf nil))
+      (let ((agent-shell-to-go-start-agent-function
+             (lambda ()
+               (let ((agent-shell-mock-agent-acp-command
+                      (list
+                       agent-shell-to-go-test-bridge--python
+                       "tests/deps/mock-acp/src/main.py"))
+                     (default-directory
+                      agent-shell-to-go-test-bridge--mock-acp-root))
+                 (setq new-buf
+                       (agent-shell-start
+                        :config (agent-shell-mock-agent-make-agent-config)))))))
+        (agent-shell-to-go-test-inbound-message tr channel nil "testuser" "!new-agent")
+        (should
+         (cl-some
+          (lambda (text) (string-match-p "Starting new agent" text))
+          (agent-shell-to-go-test-bridge--sent-texts tr)))
+        (should
+         (cl-some
+          (lambda (text) (string-match-p "Agent started" text))
+          (agent-shell-to-go-test-bridge--sent-texts tr))))
+      (when (and new-buf (buffer-live-p new-buf))
+        (kill-buffer new-buf)))))
+
+(ert-deftest agent-shell-to-go-test-bridge-command-new-project-invalid-name ()
+  "!new-project with a name containing disallowed chars replies with a usage error."
   (agent-shell-to-go-test-bridge--with-session tr buf
     (let ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf)))
-      (agent-shell-to-go-test-inbound-slash-command tr channel "/new-project")
+      (agent-shell-to-go-test-inbound-message tr channel nil "testuser"
+       "!new-project foo/bar")
       (should
        (cl-some
         (lambda (text) (string-match-p "Usage" text))
         (agent-shell-to-go-test-bridge--sent-texts tr))))))
 
-(ert-deftest agent-shell-to-go-test-bridge-slash-new-project-existing-dir ()
-  "/new-project with an already-existing directory replies with an error."
+(ert-deftest agent-shell-to-go-test-bridge-command-new-project-missing-arg ()
+  "!new-project with no :project-name replies with usage message."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf)))
+      (agent-shell-to-go-test-inbound-message tr channel nil "testuser" "!new-project")
+      (should
+       (cl-some
+        (lambda (text) (string-match-p "Usage" text))
+        (agent-shell-to-go-test-bridge--sent-texts tr))))))
+
+(ert-deftest agent-shell-to-go-test-bridge-command-new-project-existing-dir ()
+  "!new-project with an already-existing directory replies with an error."
   (agent-shell-to-go-test-bridge--with-session tr buf
     (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
            (existing (make-temp-file "ag2g-test-proj" t)))
       (unwind-protect
           (let ((agent-shell-to-go-projects-directory
                  (file-name-parent-directory existing)))
-            (agent-shell-to-go-test-inbound-slash-command
-             tr
-             channel
-             "/new-project"
-             `(:project-name ,(file-name-nondirectory existing)))
+            (agent-shell-to-go-test-inbound-message tr channel nil "testuser"
+             (format "!new-project %s" (file-name-nondirectory existing)))
             (should
              (cl-some
               (lambda (text) (string-match-p "already exists" text))
               (agent-shell-to-go-test-bridge--sent-texts tr))))
         (delete-directory existing t)))))
 
-(ert-deftest agent-shell-to-go-test-bridge-slash-new-project-success ()
-  "/new-project creates the directory and sends Creating/Starting/Started confirmations."
+(ert-deftest agent-shell-to-go-test-bridge-command-new-project-success ()
+  "!new-project creates the directory and sends Creating/Starting/Started confirmations."
   (agent-shell-to-go-test-bridge--with-session tr buf
     (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
            (projects-dir (make-temp-file "ag2g-test-projects-dir" t))
@@ -816,8 +782,8 @@ not send-text, so the deferred Discord interaction resolves cleanly."
                      (setq new-buf
                            (agent-shell-start
                             :config (agent-shell-mock-agent-make-agent-config)))))))
-            (agent-shell-to-go-test-inbound-slash-command
-             tr channel "/new-project" '(:project-name "my-proj"))
+            (agent-shell-to-go-test-inbound-message tr channel nil "testuser"
+             "!new-project my-proj")
             (let ((texts (agent-shell-to-go-test-bridge--sent-texts tr)))
               (should (cl-some (lambda (t) (string-match-p "Creating project" t)) texts))
               (should (cl-some (lambda (t) (string-match-p "Starting Claude" t)) texts))
@@ -836,211 +802,57 @@ not send-text, so the deferred Discord interaction resolves cleanly."
                          (list (cons 'sessions (vconcat ,sessions)))))))
      ,@body))
 
-(ert-deftest agent-shell-to-go-test-bridge-slash-sessions-lists-sessions ()
-  "/sessions returns a numbered list of session titles from ACP."
-  (agent-shell-to-go-test-bridge--with-session tr buf
-    (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
-           (tmpdir (make-temp-file "ag2g-test-sessions" t))
-           (agent-shell-to-go--session-list-cache nil))
-      (unwind-protect
-          (let ((agent-shell-to-go-projects-directory
-                 (file-name-parent-directory tmpdir)))
-            (agent-shell-to-go-test-bridge--with-mock-acp-sessions
-                (list
-                 '((sessionId . "S1")
-                   (title . "Build the thing")
-                   (updatedAt . "2024-01-01T00:00:00Z"))
-                 '((sessionId . "S2")
-                   (title . "Fix the bug")
-                   (updatedAt . "2024-01-01T00:00:00Z")))
-              (agent-shell-to-go-test-inbound-slash-command
-               tr channel "/sessions" `(:project-name ,(file-name-nondirectory tmpdir)))
-              (let ((texts (agent-shell-to-go-test-bridge--sent-texts tr)))
-                (should (cl-some (lambda (t) (string-match-p "1\\." t)) texts))
-                (should
-                 (cl-some (lambda (t) (string-match-p "Build the thing" t)) texts))
-                (should (cl-some (lambda (t) (string-match-p "2\\." t)) texts))
-                (should
-                 (cl-some (lambda (t) (string-match-p "Fix the bug" t)) texts)))))
-        (delete-directory tmpdir t)))))
-
-(ert-deftest agent-shell-to-go-test-bridge-slash-sessions-empty ()
-  "/sessions replies with no-sessions message when ACP returns an empty list."
-  (agent-shell-to-go-test-bridge--with-session tr buf
-    (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
-           (tmpdir (make-temp-file "ag2g-test-sessions" t))
-           (agent-shell-to-go--session-list-cache nil))
-      (unwind-protect
-          (let ((agent-shell-to-go-projects-directory
-                 (file-name-parent-directory tmpdir)))
-            (agent-shell-to-go-test-bridge--with-mock-acp-sessions nil
-              (agent-shell-to-go-test-inbound-slash-command
-               tr channel "/sessions" `(:project-name ,(file-name-nondirectory tmpdir)))
-              (should
-               (cl-some
-                (lambda (text) (string-match-p "No sessions found" text))
-                (agent-shell-to-go-test-bridge--sent-texts tr)))))
-        (delete-directory tmpdir t)))))
-
-(ert-deftest agent-shell-to-go-test-bridge-slash-sessions-from-channel ()
-  "/sessions without :project-name infers the project from the active buffer's channel-id."
+(ert-deftest agent-shell-to-go-test-bridge-command-resume-lists-sessions ()
+  "!resume with no arg returns a numbered list of session titles from ACP."
   (agent-shell-to-go-test-bridge--with-session tr buf
     (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
            (agent-shell-to-go--session-list-cache nil))
       (agent-shell-to-go-test-bridge--with-mock-acp-sessions
           (list
            '((sessionId . "S1")
-             (title . "Inferred project session")
+             (title . "Build the thing")
+             (updatedAt . "2024-01-01T00:00:00Z"))
+           '((sessionId . "S2")
+             (title . "Fix the bug")
              (updatedAt . "2024-01-01T00:00:00Z")))
-        (agent-shell-to-go-test-inbound-slash-command tr channel "/sessions")
+        (agent-shell-to-go-test-inbound-message tr channel nil "testuser" "!resume")
+        (let ((texts (agent-shell-to-go-test-bridge--sent-texts tr)))
+          (should (cl-some (lambda (t) (string-match-p "1\\." t)) texts))
+          (should
+           (cl-some (lambda (t) (string-match-p "Build the thing" t)) texts))
+          (should (cl-some (lambda (t) (string-match-p "2\\." t)) texts))
+          (should
+           (cl-some (lambda (t) (string-match-p "Fix the bug" t)) texts)))))))
+
+(ert-deftest agent-shell-to-go-test-bridge-command-resume-empty-sessions ()
+  "!resume with no arg replies with no-sessions message when ACP returns an empty list."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
+           (agent-shell-to-go--session-list-cache nil))
+      (agent-shell-to-go-test-bridge--with-mock-acp-sessions nil
+        (agent-shell-to-go-test-inbound-message tr channel nil "testuser" "!resume")
         (should
          (cl-some
-          (lambda (text) (string-match-p "Inferred project session" text))
+          (lambda (text) (string-match-p "No sessions found" text))
           (agent-shell-to-go-test-bridge--sent-texts tr)))))))
 
-(ert-deftest agent-shell-to-go-test-bridge-slash-sessions-no-project ()
-  "/sessions without :project-name on an unknown channel replies with cannot-determine."
-  (agent-shell-to-go-test-bridge--with-session tr buf
-    (agent-shell-to-go-test-inbound-slash-command tr "unknown-channel" "/sessions")
-    (should
-     (cl-some
-      (lambda (text) (string-match-p "Cannot determine project" text))
-      (agent-shell-to-go-test-bridge--sent-texts tr)))))
 
-(ert-deftest agent-shell-to-go-test-bridge-slash-sessions-fetch-failure ()
-  "/sessions replies with failure message when acp-send-request calls :on-failure."
+(ert-deftest agent-shell-to-go-test-bridge-command-resume-fetch-failure ()
+  "!resume with no arg replies with failure message when acp-send-request calls :on-failure."
   (agent-shell-to-go-test-bridge--with-session tr buf
     (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
            (agent-shell-to-go--session-list-cache nil))
       (cl-letf (((symbol-function 'acp-send-request)
                  (lambda (&rest args)
                    (funcall (plist-get args :on-failure) "acp error" nil))))
-        (agent-shell-to-go-test-inbound-slash-command tr channel "/sessions")
+        (agent-shell-to-go-test-inbound-message tr channel nil "testuser" "!resume")
         (should
          (cl-some
           (lambda (text) (string-match-p "Failed to fetch session list" text))
           (agent-shell-to-go-test-bridge--sent-texts tr)))))))
 
-(ert-deftest agent-shell-to-go-test-bridge-slash-resume-default-first ()
-  "/resume with no index resumes the most recent (first) session."
-  (agent-shell-to-go-test-bridge--with-session tr buf
-    (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
-           (tmpdir (make-temp-file "ag2g-test-resume" t))
-           (agent-shell-to-go--session-list-cache nil)
-           (agent-shell-to-go--inherit-state nil)
-           (resumed-id nil))
-      (unwind-protect
-          (let ((agent-shell-to-go-projects-directory
-                 (file-name-parent-directory tmpdir)))
-            (agent-shell-to-go-test-bridge--with-mock-acp-sessions
-                (list
-                 '((sessionId . "S1")
-                   (title . "First")
-                   (updatedAt . "2024-01-01T00:00:00Z"))
-                 '((sessionId . "S2")
-                   (title . "Second")
-                   (updatedAt . "2024-01-01T00:00:00Z")))
-              (cl-letf (((symbol-function 'agent-shell-resume-session)
-                         (lambda (id) (setq resumed-id id))))
-                (agent-shell-to-go-test-inbound-slash-command
-                 tr channel "/resume" `(:project-name ,(file-name-nondirectory tmpdir)))
-                (should (equal "S1" resumed-id))
-                (should
-                 (cl-some
-                  (lambda (text) (string-match-p "Resuming" text))
-                  (agent-shell-to-go-test-bridge--sent-texts tr))))))
-        (delete-directory tmpdir t)))))
-
-(ert-deftest agent-shell-to-go-test-bridge-slash-resume-nth ()
-  "/resume 2 resumes the second session in the list."
-  (agent-shell-to-go-test-bridge--with-session tr buf
-    (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
-           (tmpdir (make-temp-file "ag2g-test-resume" t))
-           (agent-shell-to-go--session-list-cache nil)
-           (agent-shell-to-go--inherit-state nil)
-           (resumed-id nil))
-      (unwind-protect
-          (let ((agent-shell-to-go-projects-directory
-                 (file-name-parent-directory tmpdir)))
-            (agent-shell-to-go-test-bridge--with-mock-acp-sessions
-                (list
-                 '((sessionId . "S1")
-                   (title . "First")
-                   (updatedAt . "2024-01-01T00:00:00Z"))
-                 '((sessionId . "S2")
-                   (title . "Second")
-                   (updatedAt . "2024-01-01T00:00:00Z")))
-              (cl-letf (((symbol-function 'agent-shell-resume-session)
-                         (lambda (id) (setq resumed-id id))))
-                (agent-shell-to-go-test-inbound-slash-command
-                 tr
-                 channel
-                 "/resume"
-                 `(:session "2" :project-name ,(file-name-nondirectory tmpdir)))
-                (should (equal "S2" resumed-id)))))
-        (delete-directory tmpdir t)))))
-
-(ert-deftest agent-shell-to-go-test-bridge-slash-resume-uses-cache ()
-  "/resume after /sessions uses the cached list without a second ACP call."
-  (agent-shell-to-go-test-bridge--with-session tr buf
-    (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
-           (tmpdir (make-temp-file "ag2g-test-resume" t))
-           (agent-shell-to-go--session-list-cache nil)
-           (agent-shell-to-go--inherit-state nil)
-           (acp-call-count 0)
-           (resumed-id nil))
-      (unwind-protect
-          (let ((agent-shell-to-go-projects-directory
-                 (file-name-parent-directory tmpdir)))
-            (cl-letf (((symbol-function 'acp-send-request)
-                       (lambda (&rest args)
-                         (cl-incf acp-call-count)
-                         (funcall (plist-get args :on-success)
-                                  '((sessions
-                                     .
-                                     [((sessionId . "S1")
-                                       (title . "Cached")
-                                       (updatedAt . "2024-01-01T00:00:00Z"))])))))
-                      ((symbol-function 'agent-shell-resume-session)
-                       (lambda (id) (setq resumed-id id))))
-              (agent-shell-to-go-test-inbound-slash-command
-               tr channel "/sessions" `(:project-name ,(file-name-nondirectory tmpdir)))
-              (agent-shell-to-go-test-inbound-slash-command
-               tr channel "/resume" `(:project-name ,(file-name-nondirectory tmpdir)))
-              (should (equal "S1" resumed-id))
-              (should (= 1 acp-call-count))))
-        (delete-directory tmpdir t)))))
-
-(ert-deftest agent-shell-to-go-test-bridge-slash-resume-out-of-range ()
-  "/resume N where N exceeds the session count replies with an error."
-  (agent-shell-to-go-test-bridge--with-session tr buf
-    (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
-           (tmpdir (make-temp-file "ag2g-test-resume" t))
-           (agent-shell-to-go--session-list-cache nil)
-           (agent-shell-to-go--inherit-state nil))
-      (unwind-protect
-          (let ((agent-shell-to-go-projects-directory
-                 (file-name-parent-directory tmpdir)))
-            (agent-shell-to-go-test-bridge--with-mock-acp-sessions
-                (list
-                 '((sessionId . "S1")
-                   (title . "Only one")
-                   (updatedAt . "2024-01-01T00:00:00Z")))
-              (cl-letf (((symbol-function 'agent-shell-resume-session)
-                         (lambda (_id) nil)))
-                (agent-shell-to-go-test-inbound-slash-command
-                 tr
-                 channel
-                 "/resume"
-                 `(:session "5" :project-name ,(file-name-nondirectory tmpdir)))
-                (should
-                 (cl-some
-                  (lambda (text) (string-match-p "No session #5" text))
-                  (agent-shell-to-go-test-bridge--sent-texts tr))))))
-        (delete-directory tmpdir t)))))
-
-(ert-deftest agent-shell-to-go-test-bridge-slash-resume-from-channel ()
-  "/resume without :project-name infers the project from the active buffer's channel-id."
+(ert-deftest agent-shell-to-go-test-bridge-command-resume-default-first ()
+  "!resume 1 resumes the first session inferred from the channel."
   (agent-shell-to-go-test-bridge--with-session tr buf
     (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
            (agent-shell-to-go--session-list-cache nil)
@@ -1049,28 +861,97 @@ not send-text, so the deferred Discord interaction resolves cleanly."
       (agent-shell-to-go-test-bridge--with-mock-acp-sessions
           (list
            '((sessionId . "S1")
-             (title . "Inferred session")
+             (title . "First")
+             (updatedAt . "2024-01-01T00:00:00Z"))
+           '((sessionId . "S2")
+             (title . "Second")
              (updatedAt . "2024-01-01T00:00:00Z")))
         (cl-letf (((symbol-function 'agent-shell-resume-session)
                    (lambda (id) (setq resumed-id id))))
-          (agent-shell-to-go-test-inbound-slash-command tr channel "/resume")
+          (agent-shell-to-go-test-inbound-message tr channel nil "testuser" "!resume 1")
           (should (equal "S1" resumed-id))
           (should
            (cl-some
             (lambda (text) (string-match-p "Resuming" text))
             (agent-shell-to-go-test-bridge--sent-texts tr))))))))
 
-(ert-deftest agent-shell-to-go-test-bridge-slash-resume-no-project ()
-  "/resume without :project-name on an unknown channel replies with cannot-determine."
+(ert-deftest agent-shell-to-go-test-bridge-command-resume-nth ()
+  "!resume 2 resumes the second session in the list."
   (agent-shell-to-go-test-bridge--with-session tr buf
-    (let ((agent-shell-to-go--session-list-cache nil))
-      (agent-shell-to-go-test-inbound-slash-command tr "unknown-channel" "/resume")
-      (should
-       (cl-some
-        (lambda (text) (string-match-p "Cannot determine project" text))
-        (agent-shell-to-go-test-bridge--sent-texts tr))))))
+    (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
+           (agent-shell-to-go--session-list-cache nil)
+           (agent-shell-to-go--inherit-state nil)
+           (resumed-id nil))
+      (agent-shell-to-go-test-bridge--with-mock-acp-sessions
+          (list
+           '((sessionId . "S1")
+             (title . "First")
+             (updatedAt . "2024-01-01T00:00:00Z"))
+           '((sessionId . "S2")
+             (title . "Second")
+             (updatedAt . "2024-01-01T00:00:00Z")))
+        (cl-letf (((symbol-function 'agent-shell-resume-session)
+                   (lambda (id) (setq resumed-id id))))
+          (agent-shell-to-go-test-inbound-message tr channel nil "testuser" "!resume 2")
+          (should (equal "S2" resumed-id)))))))
 
-(ert-deftest agent-shell-to-go-test-bridge-slash-resume-session-error ()
+(ert-deftest agent-shell-to-go-test-bridge-command-resume-uses-cache ()
+  "!resume 1 after !sessions uses the cached list without a second ACP call."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
+           (agent-shell-to-go--session-list-cache nil)
+           (agent-shell-to-go--inherit-state nil)
+           (acp-call-count 0)
+           (resumed-id nil))
+      (cl-letf (((symbol-function 'acp-send-request)
+                 (lambda (&rest args)
+                   (cl-incf acp-call-count)
+                   (funcall (plist-get args :on-success)
+                            '((sessions
+                               .
+                               [((sessionId . "S1")
+                                 (title . "Cached")
+                                 (updatedAt . "2024-01-01T00:00:00Z"))])))))
+                ((symbol-function 'agent-shell-resume-session)
+                 (lambda (id) (setq resumed-id id))))
+        (agent-shell-to-go-test-inbound-message tr channel nil "testuser" "!resume")
+        (agent-shell-to-go-test-inbound-message tr channel nil "testuser" "!resume 1")
+        (should (equal "S1" resumed-id))
+        (should (= 1 acp-call-count))))))
+
+(ert-deftest agent-shell-to-go-test-bridge-command-resume-out-of-range ()
+  "!resume N where N exceeds the session count replies with an error."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
+           (agent-shell-to-go--session-list-cache nil)
+           (agent-shell-to-go--inherit-state nil))
+      (agent-shell-to-go-test-bridge--with-mock-acp-sessions
+          (list
+           '((sessionId . "S1")
+             (title . "Only one")
+             (updatedAt . "2024-01-01T00:00:00Z")))
+        (cl-letf (((symbol-function 'agent-shell-resume-session)
+                   (lambda (_id) nil)))
+          (agent-shell-to-go-test-inbound-message tr channel nil "testuser" "!resume 5")
+          (should
+           (cl-some
+            (lambda (text) (string-match-p "No session #5" text))
+            (agent-shell-to-go-test-bridge--sent-texts tr))))))))
+
+(ert-deftest agent-shell-to-go-test-bridge-command-resume-no-project ()
+  "!resume without :project-name when no project resolves replies with cannot-determine."
+  (agent-shell-to-go-test-bridge--with-session tr buf
+    (let ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
+          (agent-shell-to-go--session-list-cache nil))
+      (cl-letf (((symbol-function 'agent-shell-to-go--resolve-project-from-channel)
+                 (lambda (_) nil)))
+        (agent-shell-to-go-test-inbound-message tr channel nil "testuser" "!resume")
+        (should
+         (cl-some
+          (lambda (text) (string-match-p "Cannot determine project" text))
+          (agent-shell-to-go-test-bridge--sent-texts tr)))))))
+
+(ert-deftest agent-shell-to-go-test-bridge-command-resume-session-error ()
   "/resume replies with failure message when agent-shell-resume-session signals an error."
   (agent-shell-to-go-test-bridge--with-session tr buf
     (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
@@ -1083,13 +964,13 @@ not send-text, so the deferred Discord interaction resolves cleanly."
              (updatedAt . "2024-01-01T00:00:00Z")))
         (cl-letf (((symbol-function 'agent-shell-resume-session)
                    (lambda (_id) (error "Resume failed for testing"))))
-          (agent-shell-to-go-test-inbound-slash-command tr channel "/resume")
+          (agent-shell-to-go-test-inbound-message tr channel nil "testuser" "!resume 1")
           (should
            (cl-some
             (lambda (text) (string-match-p "Failed to resume" text))
             (agent-shell-to-go-test-bridge--sent-texts tr))))))))
 
-(ert-deftest agent-shell-to-go-test-bridge-slash-project-lists-subdirs ()
+(ert-deftest agent-shell-to-go-test-bridge-command-project-lists-subdirs ()
   "/project lists non-hidden subdirectories under agent-shell-to-go-projects-directory."
   (agent-shell-to-go-test-bridge--with-session tr buf
     (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
@@ -1099,33 +980,33 @@ not send-text, so the deferred Discord interaction resolves cleanly."
             (make-directory (expand-file-name "alpha" tmpdir))
             (make-directory (expand-file-name "beta" tmpdir))
             (make-directory (expand-file-name ".hidden" tmpdir))
-            (agent-shell-to-go-test-inbound-slash-command tr channel "/projects")
+            (agent-shell-to-go-test-inbound-message tr channel nil "testuser" "!projects")
             (let ((texts (agent-shell-to-go-test-bridge--sent-texts tr)))
               (should (cl-some (lambda (t) (string-match-p "alpha" t)) texts))
               (should (cl-some (lambda (t) (string-match-p "beta" t)) texts))
               (should (cl-notany (lambda (t) (string-match-p "hidden" t)) texts))))
         (delete-directory tmpdir t)))))
 
-(ert-deftest agent-shell-to-go-test-bridge-slash-project-empty-dir ()
+(ert-deftest agent-shell-to-go-test-bridge-command-project-empty-dir ()
   "/project with an empty directory replies with a no-projects message."
   (agent-shell-to-go-test-bridge--with-session tr buf
     (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
            (tmpdir (make-temp-file "ag2g-test-projects-empty" t)))
       (unwind-protect
           (let ((agent-shell-to-go-projects-directory tmpdir))
-            (agent-shell-to-go-test-inbound-slash-command tr channel "/projects")
+            (agent-shell-to-go-test-inbound-message tr channel nil "testuser" "!projects")
             (should
              (cl-some
               (lambda (text) (string-match-p "No projects found" text))
               (agent-shell-to-go-test-bridge--sent-texts tr))))
         (delete-directory tmpdir t)))))
 
-(ert-deftest agent-shell-to-go-test-bridge-slash-projects-nonexistent-dir ()
+(ert-deftest agent-shell-to-go-test-bridge-command-projects-nonexistent-dir ()
   "/projects with a non-existent directory replies with no-projects message."
   (agent-shell-to-go-test-bridge--with-session tr buf
     (let* ((channel (buffer-local-value 'agent-shell-to-go--channel-id buf))
            (agent-shell-to-go-projects-directory "/nonexistent-ag2g-test-dir-xyz"))
-      (agent-shell-to-go-test-inbound-slash-command tr channel "/projects")
+      (agent-shell-to-go-test-inbound-message tr channel nil "testuser" "!projects")
       (should
        (cl-some
         (lambda (text) (string-match-p "No projects found" text))

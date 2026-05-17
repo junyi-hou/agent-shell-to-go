@@ -72,12 +72,6 @@
 ;;     - normalize-reaction-ignores-own-bot: own bot's reactions are dropped
 ;;     - normalize-reaction-unknown-emoji-still-fires: unknown emoji fires hook with nil :action
 ;;
-;;   agent-shell-to-go--discord-normalize-interaction
-;;     - normalize-interaction-fires-hook: APPLICATION_COMMAND fires slash-command hook
-;;     - normalize-interaction-acknowledges-before-auth: acknowledge called before auth check
-;;     - normalize-interaction-ignores-unauthorized: unauthorized users do not fire the hook
-;;     - normalize-interaction-ignores-non-command: non-APPLICATION_COMMAND types are ignored
-;;
 ;;   agent-shell-to-go--discord-handle-frame
 ;;     - gateway-hello: op 10 starts heartbeat with correct interval and sends identify
 ;;     - gateway-heartbeat-ack: op 11 produces no sends
@@ -551,90 +545,6 @@ RESPONSES is an alist keyed by (METHOD . ENDPOINT); unmatched calls return nil."
     (should (null (plist-get received :action)))
     (should (equal "dancing_penguin" (plist-get received :raw-emoji)))))
 
-;; INTERACTION_CREATE
-
-(ert-deftest agent-shell-to-go-test-discord-normalize-interaction-fires-hook ()
-  "INTERACTION_CREATE fires the slash-command hook for authorized users."
-  (let* ((tr (agent-shell-to-go-test-discord--make))
-         (agent-shell-to-go-discord-authorized-users '("USER1"))
-         (received nil)
-         (agent-shell-to-go-slash-command-hook
-          (list (lambda (&rest plist) (setq received plist)))))
-    (cl-letf (((symbol-function 'agent-shell-to-go-transport-acknowledge-interaction)
-               (lambda (&rest _) nil)))
-      (agent-shell-to-go--discord-normalize-interaction
-       tr
-       '((id . "INT1")
-         (token . "TOK1")
-         (type . 2)
-         (channel_id . "C1")
-         (member . ((user . ((id . "USER1")))))
-         (data
-          .
-          ((name . "new-agent")
-           (options . [((name . "folder") (value . "~/code"))]))))))
-    (should received)
-    (should (equal "/new-agent" (plist-get received :command)))
-    (should (equal "~/code" (plist-get received :args-text)))))
-
-(ert-deftest
-    agent-shell-to-go-test-discord-normalize-interaction-acknowledges-before-auth
-    ()
-  "Acknowledge is called even for unauthorized users (satisfies the 3-second window)."
-  (let* ((tr (agent-shell-to-go-test-discord--make))
-         (agent-shell-to-go-discord-authorized-users nil)
-         (acknowledged nil)
-         (agent-shell-to-go-slash-command-hook nil))
-    (cl-letf (((symbol-function 'agent-shell-to-go-transport-acknowledge-interaction)
-               (lambda (_tr token &rest _) (setq acknowledged token))))
-      (agent-shell-to-go--discord-normalize-interaction
-       tr
-       '((id . "INT2")
-         (token . "TOK2")
-         (type . 2)
-         (channel_id . "C1")
-         (member . ((user . ((id . "STRANGER")))))
-         (data . ((name . "new-agent") (options . []))))))
-    (should (equal "INT2:TOK2" acknowledged))))
-
-(ert-deftest agent-shell-to-go-test-discord-normalize-interaction-ignores-unauthorized
-    ()
-  "Slash-command hook is not fired for unauthorized users."
-  (let* ((tr (agent-shell-to-go-test-discord--make))
-         (agent-shell-to-go-discord-authorized-users '("ALLOWED"))
-         (received nil)
-         (agent-shell-to-go-slash-command-hook
-          (list (lambda (plist) (setq received plist)))))
-    (cl-letf (((symbol-function 'agent-shell-to-go-transport-acknowledge-interaction)
-               (lambda (&rest _) nil)))
-      (agent-shell-to-go--discord-normalize-interaction
-       tr
-       '((id . "INT3")
-         (token . "TOK3")
-         (type . 2)
-         (channel_id . "C1")
-         (member . ((user . ((id . "STRANGER")))))
-         (data . ((name . "new-agent") (options . []))))))
-    (should (null received))))
-
-(ert-deftest agent-shell-to-go-test-discord-normalize-interaction-ignores-non-command ()
-  "Interaction types other than APPLICATION_COMMAND (2) are ignored."
-  (let* ((tr (agent-shell-to-go-test-discord--make))
-         (agent-shell-to-go-discord-authorized-users '("USER1"))
-         (received nil)
-         (agent-shell-to-go-slash-command-hook
-          (list (lambda (plist) (setq received plist)))))
-    (cl-letf (((symbol-function 'agent-shell-to-go-transport-acknowledge-interaction)
-               (lambda (&rest _) nil)))
-      (agent-shell-to-go--discord-normalize-interaction
-       tr
-       '((id . "INT4")
-         (token . "TOK4")
-         (type . 3)
-         (channel_id . "C1")
-         (member . ((user . ((id . "USER1")))))
-         (data . ((name . "new-agent") (options . []))))))
-    (should (null received))))
 
 ; 4. Gateway (handle-frame opcode routing)
 

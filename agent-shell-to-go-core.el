@@ -11,8 +11,8 @@
 
 ;; Shared infrastructure required by all transport implementations:
 ;; defcustoms, shared utilities, the transport struct/generics, the
-;; transport registry, inbound hook variables, storage helpers, the
-;; generic WebSocket state machine, and slash-command arg schemas.
+;; transport registry, inbound hook variables, storage helpers, and the
+;; generic WebSocket state machine.
 ;;
 ;; Transport files (slack, discord, …) and the bridge all require this
 ;; file directly.  The top-level `agent-shell-to-go.el' requires this
@@ -31,12 +31,6 @@
   :prefix "agent-shell-to-go-")
 
 ; custom variables 
-
-(defcustom agent-shell-to-go-default-folder
-  (expand-file-name ".agent-shell-to-go" (expand-file-name "~"))
-  "Default folder for `/new-agent' when no folder is specified."
-  :type 'string
-  :group 'agent-shell-to-go)
 
 (defcustom agent-shell-to-go-start-agent-function #'agent-shell
   "Function to call to start a new agent-shell.
@@ -188,10 +182,9 @@ Each transport knows its own user-id format.")
     (transport channel-id thread-id text &optional options)
   "Send TEXT on TRANSPORT to CHANNEL-ID under THREAD-ID.
 OPTIONS is a plist, possibly including:
-  :truncate           truncate long content, store the rest for expansion
-  :ephemeral          only visible to :user-id
-  :user-id            target user for ephemeral
-  :interaction-token  opaque transport token for ack-style replies
+  :truncate   truncate long content, store the rest for expansion
+  :ephemeral  only visible to :user-id
+  :user-id    target user for ephemeral
 Returns a message-id string.")
 
 (cl-defgeneric agent-shell-to-go-transport-edit-message
@@ -203,18 +196,6 @@ Returns non-nil if the edit succeeded.")
     (transport channel-id thread-id path &optional comment)
   "Upload PATH to CHANNEL under THREAD-ID with optional COMMENT.")
 
-(cl-defgeneric agent-shell-to-go-transport-acknowledge-interaction
-    (transport interaction-token &optional options)
-  "Acknowledge a TRANSPORT interaction for INTERACTION-TOKEN.
-Required on Discord for the 3-second interaction rule; no-op on Slack.
-OPTIONS may include :ephemeral or :deferred.")
-
-(cl-defgeneric agent-shell-to-go-transport-followup-interaction
-    (transport interaction-token text)
-  "Edit the deferred response for INTERACTION-TOKEN on TRANSPORT to TEXT.
-Called after a type-5 ack to resolve the pending interaction.
-No-op when INTERACTION-TOKEN is nil or unsupported by the transport."
-  nil)
 
 ;; Read
 
@@ -365,18 +346,7 @@ Plist argument:
   :raw-emoji  opaque raw emoji (do not assume stringp)
   :added-p    t if reaction was added, nil if removed")
 
-(defvar agent-shell-to-go-slash-command-hook nil
-  "Hook run when a remote slash command fires.
-Plist argument:
-  :transport         transport struct
-  :command           command name string (with leading slash)
-  :args              typed args plist (per-command schema)
-  :args-text         raw argument text
-  :channel-id        channel id
-  :user              remote user id
-  :interaction-token opaque ack token (nil on Slack)")
-
-; Storage helpers (for truncated/hidden texts) 
+; Storage helpers (for truncated/hidden texts)
 ;; TODO: Replace truncation/hide mechanism with message splitting across multiple
 ;; transport sends.  Splitting removes the need for expand reactions and handles
 ;; agent messages (currently not truncated), which can also exceed transport limits
@@ -606,33 +576,6 @@ Closes any existing socket first."
   "Schedule FN with ARGS to run on the next event loop iteration."
   (apply #'run-at-time 0 nil fn args))
 
-; Slash command arg schemas 
+(provide 'agent-shell-to-go-core) 
 
-(defconst agent-shell-to-go--slash-command-schemas
-  '(("/new-agent"   (:folder string))
-    ("/new-project" (:project-name string))
-    ("/sessions"    (:project-name string))
-    ("/resume"      (:session string :project-name string)))
-  "Per-command arg schemas for transports that need to parse text args.
-Each entry is (COMMAND . SCHEMA).  Transports consult this when
-converting raw text to a typed args plist for the slash-command hook.")
-
-(defun agent-shell-to-go--parse-slash-args (command text)
-  "Parse TEXT into a typed args plist for COMMAND using the schema.
-Returns nil if no schema is found; the caller keeps :args-text either way.
-Each schema entry is a flat (:key type ...) plist.  Single-key commands
-map the whole TEXT to that key; multi-key commands split TEXT by whitespace
-and map tokens positionally."
-  (when-let* ((schema (cadr (assoc command agent-shell-to-go--slash-command-schemas)))
-              (trimmed (and text (string-trim text))))
-    (let ((keys (seq-filter #'keywordp schema)))
-      (if (= (length keys) 1)
-          (list (car keys) (and (not (string-empty-p trimmed)) trimmed))
-        (let ((tokens (and (not (string-empty-p trimmed))
-                           (split-string trimmed nil t))))
-          (cl-loop for key in keys
-                   for token in (append tokens (make-list (length keys) nil))
-                   append (list key token)))))))
-
-(provide 'agent-shell-to-go-core)
 ;;; agent-shell-to-go-core.el ends here

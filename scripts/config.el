@@ -52,6 +52,3 @@
 
 ;; Which transport to use by default
 (setq agent-shell-to-go-default-transport 'slack)
-
-;; Default folder for /new-agent
-(setq agent-shell-to-go-default-folder "~/code")

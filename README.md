@@ -189,9 +189,6 @@ Long messages are automatically truncated to 500 characters. Add 👀 to see mor
 ## Customization
 
 ```elisp
-;; Default folder for /new-agent when no folder is specified
-(setq agent-shell-to-go-default-folder "~/code")
-
 ;; Custom function to start agents
 (setq agent-shell-to-go-start-agent-function #'my/start-claude-code)
 

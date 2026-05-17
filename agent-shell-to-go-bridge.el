@@ -226,143 +226,347 @@ where each entry is a plist with :kind and :option-id."
 
 ; !-command handler 
 
-(defun agent-shell-to-go--handle-command (text buffer)
-  "Handle !-command TEXT in BUFFER.  Return t if handled, nil otherwise."
-  (let ((cmd (downcase (string-trim text))))
-    (with-current-buffer buffer
-      (pcase cmd
-        ((or "!yolo" "!bypass")
-         (agent-shell-to-go--set-mode buffer "bypassPermissions" "Bypass Permissions")
-         t)
-        ((or "!safe" "!accept" "!acceptedits")
-         (agent-shell-to-go--set-mode buffer "acceptEdits" "Accept Edits")
-         t)
-        ((or "!plan" "!planmode")
-         (agent-shell-to-go--set-mode buffer "plan" "Plan")
-         t)
-        ("!mode"
-         (let ((mode-id (map-nested-elt agent-shell--state '(:session :mode-id))))
-           (agent-shell-to-go--send (format "Mode: *%s*" (or mode-id "unknown"))))
-         t)
-        ("!help"
-         (agent-shell-to-go--send
-          (concat
-           "*Commands:*\n"
-           "`!yolo` — bypass permissions\n"
-           "`!safe` — accept edits mode\n"
-           "`!plan` — plan mode\n"
-           "`!mode` — show current mode\n"
-           "`!stop` — interrupt agent\n"
-           "`!restart` — kill and restart agent\n"
-           "`!queue` — show queued messages\n"
-           "`!clearqueue` — clear queued messages\n"
-           ;; "`!latest` — jump to bottom of thread\n"
-           "`!info` — show session info"))
-         t)
-        ("!queue"
-         (let ((pending (map-elt agent-shell--state :pending-requests)))
-           (if (seq-empty-p pending)
-               (agent-shell-to-go--send "No pending requests")
-             (agent-shell-to-go--send
-              (format "*Pending (%d):*\n%s"
-                      (length pending)
-                      (mapconcat
-                       (lambda (r)
-                         (format "- %s" (agent-shell-to-go--truncate-text r 80)))
-                       pending
-                       "\n")))))
-         t)
-        ("!clearqueue"
-         (let ((count (length (map-elt agent-shell--state :pending-requests))))
-           (map-put! agent-shell--state :pending-requests nil)
-           (agent-shell-to-go--send
-            (format "Cleared %d request%s"
-                    count
-                    (if (= count 1)
-                        ""
-                      "s"))))
-         t)
-        ("!info"
-         (let* ((state agent-shell--state)
-                (session-id (map-nested-elt state '(:session :id)))
-                (mode-id (map-nested-elt state '(:session :mode-id)))
-                (truncated-count
-                 (let ((dir
-                        (expand-file-name (format "truncated/%s/"
-                                                  agent-shell-to-go--channel-id)
-                                          (agent-shell-to-go-transport-storage-root
-                                           agent-shell-to-go--transport))))
-                   (if (file-directory-p dir)
-                       (length (directory-files dir nil "\\.txt$"))
-                     0))))
-           (agent-shell-to-go--send
-            (format
-             "*Debug*\nBuffer: `%s`\nThread: `%s`\nChannel: `%s`\nSession: `%s`\nMode: `%s`\nTruncated: %d"
-             (buffer-name buffer)
-             agent-shell-to-go--thread-id
-             agent-shell-to-go--channel-id
-             (or session-id "none")
-             (or mode-id "default")
-             truncated-count)))
-         t)
-        ("!stop"
-         (condition-case err
-             (progn
-               (agent-shell-interrupt t)
-               (agent-shell-to-go--send "Agent interrupted"))
-           (error
-            (agent-shell-to-go--send (format "Stop failed: %s" err))))
-         t)
-        ("!restart"
-         (condition-case err
-             (let* ((session-id (map-nested-elt agent-shell--state '(:session :id))))
-               (unless session-id
-                 (error "No active session to restart"))
-               (setq agent-shell-to-go--inherit-state
-                     (list
-                      :transport agent-shell-to-go--transport
-                      :channel-id agent-shell-to-go--channel-id
-                      :thread-id agent-shell-to-go--thread-id))
-               (setq agent-shell-to-go--restarting t)
-               (agent-shell-to-go--send "Restarting agent…")
-               (ignore-errors
-                 (agent-shell-interrupt t))
-               (condition-case restart-err
-                   (when-let* ((win (agent-shell-restart :session-id session-id))
-                               (new-buf (and (windowp win) (window-buffer win)))
-                               (_ (buffer-live-p new-buf))
-                               (_
-                                (with-current-buffer new-buf
-                                  (derived-mode-p 'agent-shell-mode))))
-                     (with-current-buffer new-buf
-                       ;; Strictly speaking, we don't need this since
-                       ;; agent-shell-to-go-mode is likely to be already hooked to
-                       ;; agent-shell-mode-hook if we are here. But there is no harm
-                       ;; to do it one more time.
-                       (agent-shell-to-go-mode 1)))
-                 (error
-                  (setq agent-shell-to-go--inherit-state nil)
-                  (agent-shell-to-go--debug "restart failed: %s" restart-err))))
-           (error
-            (setq agent-shell-to-go--inherit-state nil)
-            (agent-shell-to-go--send (format "Restart failed: %s" err))))
-         t)
-        (_ nil)))))
 
-; Inbound hook handlers (registered on message/reaction/slash hooks) 
+(defun agent-shell-to-go--cmd-bypass (_args buffer)
+  (agent-shell-to-go--set-mode buffer "bypassPermissions" "Bypass Permissions"))
+
+(defun agent-shell-to-go--cmd-safe (_args buffer)
+  (agent-shell-to-go--set-mode buffer "acceptEdits" "Accept Edits"))
+
+(defun agent-shell-to-go--cmd-plan (_args buffer)
+  (agent-shell-to-go--set-mode buffer "plan" "Plan"))
+
+(defun agent-shell-to-go--cmd-mode (_args _buffer)
+  (let ((mode-id (map-nested-elt agent-shell--state '(:session :mode-id))))
+    (agent-shell-to-go--send (format "Mode: *%s*" (or mode-id "unknown")))))
+
+(defun agent-shell-to-go--cmd-help (_args _buffer)
+  (agent-shell-to-go--send
+   (concat
+    "*Commands:*\n"
+    "`!yolo` — bypass permissions\n"
+    "`!safe` — accept edits mode\n"
+    "`!plan` — plan mode\n"
+    "`!mode` — show current mode\n"
+    "`!stop` — interrupt agent\n"
+    "`!restart` — kill and restart agent\n"
+    "`!queue` — show queued messages\n"
+    "`!clearqueue` — clear queued messages\n"
+    "`!info` — show session info\n"
+    "`!projects` — list projects\n"
+    "`!new-agent [project]` — start agent in project, or new agent in current project\n"
+    "`!new-project <name>` — create project and start agent\n"
+    "`!resume [N]` — list sessions, or resume session N if given")))
+
+(defun agent-shell-to-go--cmd-queue (_args _buffer)
+  (let ((pending (map-elt agent-shell--state :pending-requests)))
+    (if (seq-empty-p pending)
+        (agent-shell-to-go--send "No pending requests")
+      (agent-shell-to-go--send
+       (format "*Pending (%d):*\n%s"
+               (length pending)
+               (mapconcat (lambda (r)
+                            (format "- %s" (agent-shell-to-go--truncate-text r 80)))
+                          pending
+                          "\n"))))))
+
+(defun agent-shell-to-go--cmd-clearqueue (_args _buffer)
+  (let ((count (length (map-elt agent-shell--state :pending-requests))))
+    (map-put! agent-shell--state :pending-requests nil)
+    (agent-shell-to-go--send
+     (format "Cleared %d request%s"
+             count
+             (if (= count 1)
+                 ""
+               "s")))))
+
+(defun agent-shell-to-go--cmd-info (_args buffer)
+  (let* ((state agent-shell--state)
+         (session-id (map-nested-elt state '(:session :id)))
+         (mode-id (map-nested-elt state '(:session :mode-id)))
+         (truncated-count
+          (let ((dir
+                 (expand-file-name (format "truncated/%s/"
+                                           agent-shell-to-go--channel-id)
+                                   (agent-shell-to-go-transport-storage-root
+                                    agent-shell-to-go--transport))))
+            (if (file-directory-p dir)
+                (length (directory-files dir nil "\\.txt$"))
+              0))))
+    (agent-shell-to-go--send
+     (format
+      "*Debug*\nBuffer: `%s`\nThread: `%s`\nChannel: `%s`\nSession: `%s`\nMode: `%s`\nTruncated: %d"
+      (buffer-name buffer)
+      agent-shell-to-go--thread-id
+      agent-shell-to-go--channel-id
+      (or session-id "none")
+      (or mode-id "default")
+      truncated-count))))
+
+(defun agent-shell-to-go--cmd-stop (_args _buffer)
+  (condition-case err
+      (progn
+        (agent-shell-interrupt t)
+        (agent-shell-to-go--send "Agent interrupted"))
+    (error
+     (agent-shell-to-go--send (format "Stop failed: %s" err)))))
+
+(defun agent-shell-to-go--cmd-restart (_args buffer)
+  (condition-case err
+      (let* ((session-id (map-nested-elt agent-shell--state '(:session :id))))
+        (unless session-id
+          (error "No active session to restart"))
+        (setq agent-shell-to-go--inherit-state
+              (list
+               :transport agent-shell-to-go--transport
+               :channel-id agent-shell-to-go--channel-id
+               :thread-id agent-shell-to-go--thread-id))
+        (setq agent-shell-to-go--restarting t)
+        (agent-shell-to-go--send "Restarting agent…")
+        (ignore-errors
+          (agent-shell-interrupt t))
+        (condition-case restart-err
+            (when-let* ((win (agent-shell-restart :session-id session-id))
+                        (new-buf (and (windowp win) (window-buffer win)))
+                        (_ (buffer-live-p new-buf))
+                        (_
+                         (with-current-buffer new-buf
+                           (derived-mode-p 'agent-shell-mode))))
+              (with-current-buffer new-buf
+                (agent-shell-to-go-mode 1)))
+          (error
+           (setq agent-shell-to-go--inherit-state nil)
+           (agent-shell-to-go--debug "restart failed: %s" restart-err))))
+    (error
+     (setq agent-shell-to-go--inherit-state nil)
+     (agent-shell-to-go--send (format "Restart failed: %s" err)))))
+
+(defun agent-shell-to-go--cmd-projects (_args _buffer)
+  (let* ((dir (expand-file-name agent-shell-to-go-projects-directory))
+         (names
+          (and (file-directory-p dir)
+               (seq-filter
+                (lambda (f)
+                  (and (not (string-prefix-p "." f))
+                       (file-directory-p (expand-file-name f dir))))
+                (directory-files dir)))))
+    (if (null names)
+        (agent-shell-to-go--send (format "No projects found in `%s`." dir))
+      (agent-shell-to-go--send
+       (string-join (cons
+                     (format "Projects in `%s`:" dir)
+                     (mapcar (lambda (n) (format "• %s" n)) names))
+                    "\n")))))
+
+(defun agent-shell-to-go--cmd-new-agent (args _buffer)
+  (let ((arg (car args)))
+    (cond
+     ((and arg (not (string-match-p (agent-shell-to-go--project-name-regexp) arg)))
+      (agent-shell-to-go--send
+       "Usage: `!new-agent [project]` — project must be an existing subdirectory name"))
+     (arg
+      (let ((folder (expand-file-name arg agent-shell-to-go-projects-directory)))
+        (if (not (file-directory-p folder))
+            (agent-shell-to-go--send
+             (format "Unknown project: `%s`. Use `!projects` to see available projects."
+                     arg))
+          (agent-shell-to-go--send (format "Starting agent in `%s`..." folder))
+          (if (agent-shell-to-go--start-agent-in-folder folder)
+              (agent-shell-to-go--send (format "Agent started in `%s`" folder))
+            (agent-shell-to-go--send "Failed to start agent.")))))
+     (t
+      (agent-shell-to-go--send "Starting new agent…")
+      (if (agent-shell-to-go--start-agent-in-folder default-directory)
+          (agent-shell-to-go--send "Agent started")
+        (agent-shell-to-go--send "Failed to start agent."))))))
+
+(defun agent-shell-to-go--cmd-new-project (args _buffer)
+  (let
+      ((usage
+        "Usage: `!new-project <name>` — name may only contain letters, digits, `-`, `_`, `.`"))
+    (cond
+     ((not (car args))
+      (agent-shell-to-go--send usage))
+     ((not (string-match-p "\\`[a-zA-Z0-9_.-]+\\'" (car args)))
+      (agent-shell-to-go--send usage))
+     (t
+      (let ((project-dir
+             (expand-file-name (car args) agent-shell-to-go-projects-directory)))
+        (if (file-exists-p project-dir)
+            (agent-shell-to-go--send
+             (format "Project already exists: `%s`" project-dir))
+          (agent-shell-to-go--send (format "Creating project: `%s`" project-dir))
+          (let ((start-fn
+                 (lambda (final-dir)
+                   (agent-shell-to-go--send "Starting Claude Code…")
+                   (if (agent-shell-to-go--start-agent-in-folder final-dir)
+                       (agent-shell-to-go--send
+                        (format "Agent started in `%s`" final-dir))
+                     (agent-shell-to-go--send "Failed to start agent.")))))
+            (if agent-shell-to-go-new-project-function
+                (funcall agent-shell-to-go-new-project-function
+                         (car args)
+                         (expand-file-name agent-shell-to-go-projects-directory)
+                         start-fn)
+              (make-directory project-dir t)
+              (funcall start-fn project-dir)))))))))
+
+(defun agent-shell-to-go--cmd-sessions (_args _buffer)
+  (let* ((project-path
+          (agent-shell-to-go--resolve-project-from-channel
+           agent-shell-to-go--channel-id))
+         (tport agent-shell-to-go--transport)
+         (chan agent-shell-to-go--channel-id)
+         (thrd agent-shell-to-go--thread-id)
+         (send
+          (lambda (text) (agent-shell-to-go-transport-send-text tport chan thrd text))))
+    (if (not project-path)
+        (agent-shell-to-go--send "Cannot determine project.")
+      (agent-shell-to-go--fetch-sessions
+       project-path
+       (lambda (sessions)
+         (funcall send (agent-shell-to-go--format-session-list project-path sessions)))
+       send))))
+
+(defun agent-shell-to-go--cmd-resume (args _buffer)
+  (let* ((n (max 1 (string-to-number (car args))))
+         (project-path
+          (agent-shell-to-go--resolve-project-from-channel
+           agent-shell-to-go--channel-id))
+         (tport agent-shell-to-go--transport)
+         (chan agent-shell-to-go--channel-id)
+         (thrd agent-shell-to-go--thread-id)
+         (reply
+          (lambda (text) (agent-shell-to-go-transport-send-text tport chan thrd text))))
+    (if (not project-path)
+        (agent-shell-to-go--send "Cannot determine project.")
+      (let* ((cached
+              (alist-get project-path agent-shell-to-go--session-list-cache
+                         nil
+                         nil
+                         #'equal))
+             (sessions (map-elt cached :sessions)))
+        (if sessions
+            (agent-shell-to-go--do-resume reply project-path sessions n)
+          (agent-shell-to-go--fetch-sessions
+           project-path
+           (lambda (fetched)
+             (agent-shell-to-go--do-resume reply project-path fetched n))
+           reply))))))
+
+(defun agent-shell-to-go--project-name-regexp ()
+  "Return a regexp matching any existing project directory name."
+  (let* ((dir (expand-file-name agent-shell-to-go-projects-directory))
+         (names
+          (and (file-directory-p dir)
+               (seq-filter
+                (lambda (f)
+                  (and (not (string-prefix-p "." f))
+                       (file-directory-p (expand-file-name f dir))))
+                (directory-files dir)))))
+    (if names
+        (regexp-opt names)
+      "\\`\\'")))
+
+(defconst agent-shell-to-go--commands
+  `( ;; mode
+    (,#'agent-shell-to-go--cmd-bypass "!yolo")
+    (,#'agent-shell-to-go--cmd-bypass "!bypass")
+    (,#'agent-shell-to-go--cmd-safe "!safe")
+    (,#'agent-shell-to-go--cmd-safe "!accept")
+    (,#'agent-shell-to-go--cmd-safe "!acceptedits")
+    (,#'agent-shell-to-go--cmd-plan "!plan")
+    (,#'agent-shell-to-go--cmd-plan "!planmode")
+    ;; info
+    (,#'agent-shell-to-go--cmd-mode "!mode")
+    (,#'agent-shell-to-go--cmd-help "!help")
+    (,#'agent-shell-to-go--cmd-info "!info")
+    ;; queue
+    (,#'agent-shell-to-go--cmd-queue "!queue")
+    (,#'agent-shell-to-go--cmd-clearqueue "!clearqueue")
+    ;; control
+    (,#'agent-shell-to-go--cmd-stop "!stop")
+    (,#'agent-shell-to-go--cmd-restart "!restart")
+    ;; projects
+    (,#'agent-shell-to-go--cmd-projects "!projects")
+    (,#'agent-shell-to-go--cmd-new-agent "!new-agent")
+    (,#'agent-shell-to-go--cmd-new-agent
+     "!new-agent" ,#'agent-shell-to-go--project-name-regexp)
+    (,#'agent-shell-to-go--cmd-new-project "!new-project")
+    (,#'agent-shell-to-go--cmd-new-project "!new-project" "[a-zA-Z0-9_.-]+")
+    ;; sessions
+    (,#'agent-shell-to-go--cmd-sessions "!resume")
+    (,#'agent-shell-to-go--cmd-resume "!resume" "[0-9]+"))
+  "Alist of (HANDLER CMD ARG-REGEX...) for !-command dispatch.
+Each entry builds the regex ^CMD\\s-+ARG1...$ at dispatch time.
+HANDLER is called with (ARGS BUFFER) with BUFFER current.")
+
+(defun agent-shell-to-go--dispatch (text buffer)
+  "Dispatch TEXT as a !-command in BUFFER, or inject it as a message."
+  (if (not (string-prefix-p "!" text))
+      (agent-shell-to-go--inject-message text)
+    ;; Extract cmd and at most one arg token without splitting the full text.
+    (let* ((sep (string-match "\\s-+" text))
+           (cmd
+            (if sep
+                (substring text 0 sep)
+              text))
+           (arg
+            (and sep
+                 (let ((arg-str
+                        (substring text
+                                   (match-end 0)
+                                   (string-match "\\s-+" text (match-end 0)))))
+                   (and (not (string-empty-p arg-str)) arg-str))))
+           (key
+            (if arg
+                (concat cmd " " arg)
+              cmd))
+           ;; Phase 1: entries whose command string literally matches cmd.
+           (cmd-entries
+            (seq-filter (lambda (e) (equal (cadr e) cmd)) agent-shell-to-go--commands))
+           ;; Phase 2 (lazy): only among cmd-entries, find one whose full regex
+           ;; matches key.  Skipped when cmd-entries is nil.
+           (full-entry
+            (and cmd-entries
+                 (seq-find
+                  (lambda (e)
+                    (string-match-p
+                     (concat
+                      "^"
+                      (string-join (mapcar
+                                    (lambda (p)
+                                      (if (functionp p)
+                                          (funcall p)
+                                        p))
+                                    (cdr e))
+                                   "\\s-+")
+                      "$")
+                     key))
+                  cmd-entries))))
+      (cond
+       ;; Unknown command — pass through to agent.
+       ((null cmd-entries)
+        (agent-shell-to-go--inject-message text))
+       ;; Known command, arg (if any) matches pattern — dispatch normally.
+       (full-entry
+        (funcall (car full-entry) (and arg (list arg)) buffer))
+       ;; Known command, arg does not match — call the first handler for this
+       ;; cmd with the raw arg; the handler is responsible for the error message.
+       (t
+        (funcall (caar cmd-entries) (and arg (list arg)) buffer))))))
+
+; Inbound hook handlers (registered on message/reaction hooks)
 
 (cl-defun agent-shell-to-go--bridge-on-message
     (&key transport channel-id thread-id text &allow-other-keys)
   "Handle an inbound message from a transport."
   (when-let* ((buffer
-               (and thread-id
-                    (agent-shell-to-go--find-buffer-for-transport-channel-thread
-                     transport channel-id
-                     thread-id))))
+               (agent-shell-to-go--find-buffer-for-transport-channel-thread
+                transport channel-id
+                thread-id)))
     (with-current-buffer buffer
-      (if (string-prefix-p "!" text)
-          (agent-shell-to-go--handle-command text buffer)
-        (agent-shell-to-go--inject-message text)))))
+      (agent-shell-to-go--dispatch text buffer))))
 
 (cl-defun agent-shell-to-go--bridge-on-reaction
     (&key transport channel-id msg-id action added-p &allow-other-keys)
@@ -384,127 +588,34 @@ Presentation reactions are handled by the main dispatcher registered first."
                              :key #'car
                              :test #'equal))))))))
 
-(cl-defun agent-shell-to-go--bridge-on-slash-command
-    (&key transport command args channel-id interaction-token &allow-other-keys)
-  "Handle an inbound slash command from a transport."
-  (let* ((typed-args args)
-         (reply
-          (lambda (text)
-            (if interaction-token
-                (agent-shell-to-go-transport-followup-interaction
-                 transport interaction-token text)
-              (agent-shell-to-go-transport-send-text transport channel-id nil text)))))
-    (pcase command
-      ("/new-agent" (let* ((explicit-folder (map-elt typed-args :folder))
-              (folder
-               (expand-file-name
-                (or explicit-folder agent-shell-to-go-default-folder))))
-         (unless explicit-folder
-           (make-directory folder t))
-         (agent-shell-to-go--start-agent-in-folder folder transport reply)))
-      ("/new-project" (let ((project-name (map-elt typed-args :project-name)))
-         (if (not project-name)
-             (funcall reply "Usage: `/new-project <project-name>`")
-           (let ((project-dir
-                  (expand-file-name project-name agent-shell-to-go-projects-directory)))
-             (if (file-exists-p project-dir)
-                 (funcall reply (format "Project already exists: `%s`" project-dir))
-               (funcall reply (format "Creating project: `%s`" project-dir))
-               (let ((start-fn
-                      (lambda (final-dir)
-                        (funcall reply "Starting Claude Code…")
-                        (agent-shell-to-go--start-agent-in-folder
-                         final-dir transport reply))))
-                 (if agent-shell-to-go-new-project-function
-                     (funcall agent-shell-to-go-new-project-function
-                              project-name
-                              (expand-file-name agent-shell-to-go-projects-directory)
-                              start-fn)
-                   (make-directory project-dir t)
-                   (funcall start-fn project-dir))))))))
-      ("/projects" (let* ((dir (expand-file-name agent-shell-to-go-projects-directory))
-              (names
-               (and (file-directory-p dir)
-                    (seq-filter
-                     (lambda (f)
-                       (and (not (string-prefix-p "." f))
-                            (file-directory-p (expand-file-name f dir))))
-                     (directory-files dir)))))
-         (if (null names)
-             (funcall reply (format "No projects found in `%s`." dir))
-           (funcall reply
-                    (string-join (cons
-                                  (format "Projects in `%s`:" dir)
-                                  (mapcar (lambda (n) (format "• %s" n)) names))
-                                 "\n")))))
-      ("/sessions" (let* ((proj-name (map-elt typed-args :project-name))
-              (project-path
-               (if proj-name
-                   (expand-file-name proj-name agent-shell-to-go-projects-directory)
-                 (agent-shell-to-go--resolve-project-from-channel channel-id))))
-         (if (not project-path)
-             (funcall reply "Cannot determine project. Use `/sessions <proj-name>`.")
-           (agent-shell-to-go--fetch-sessions
-            project-path
-            (lambda (sessions)
-              (funcall reply
-                       (agent-shell-to-go--format-session-list project-path sessions)))
-            reply))))
-      ("/resume" (let* ((session-arg (map-elt typed-args :session))
-              (proj-name (map-elt typed-args :project-name))
-              (n
-               (if session-arg
-                   (max 1 (string-to-number session-arg))
-                 1))
-              (project-path
-               (if proj-name
-                   (expand-file-name proj-name agent-shell-to-go-projects-directory)
-                 (agent-shell-to-go--resolve-project-from-channel channel-id))))
-         (if (not project-path)
-             (funcall reply "Cannot determine project. Use `/resume [N] <proj-name>`.")
-           (let* ((cached
-                   (alist-get project-path agent-shell-to-go--session-list-cache
-                              nil
-                              nil
-                              #'equal))
-                  (sessions (map-elt cached :sessions)))
-             (if sessions
-                 (agent-shell-to-go--do-resume transport reply project-path sessions n)
-               (agent-shell-to-go--fetch-sessions
-                project-path
-                (lambda (fetched)
-                  (agent-shell-to-go--do-resume transport reply project-path fetched n))
-                reply)))))))))
 
-(defun agent-shell-to-go--start-agent-in-folder (folder transport reply)
-  "Start an agent in FOLDER and call REPLY with a status message.
-REPLY is a one-argument function that delivers the message back to
-wherever the slash command originated."
+(defun agent-shell-to-go--start-agent-in-folder (folder)
+  "Start an agent in FOLDER.  Returns non-nil on success."
   (agent-shell-to-go--debug "starting agent in %s" folder)
-  (if (file-directory-p folder)
-      (let ((default-directory folder))
-        (save-window-excursion
-          (condition-case err
-              (let ((bufs-before (agent-shell-buffers)))
-                ;; Omit :channel-id so bridge-enable derives the correct project
-                ;; channel via ensure-project-channel, regardless of which
-                ;; channel the slash command was invoked from.
-                (setq agent-shell-to-go--inherit-state
-                      (list :transport transport))
-                (funcall agent-shell-to-go-start-agent-function)
-                (when-let* ((new-buf
-                             (cl-find-if
-                              (lambda (b) (not (memq b bufs-before)))
-                              (agent-shell-buffers))))
-                  (with-current-buffer new-buf
-                    (agent-shell-to-go-mode 1))
-                  (funcall reply (format "Agent started in `%s`" folder))))
-            (error
-             (setq agent-shell-to-go--inherit-state nil)
-             (agent-shell-to-go--debug "error starting agent: %s" err)))))
-    (funcall reply (format "Folder does not exist: `%s`" folder))))
+  (when (file-directory-p folder)
+    (let ((default-directory folder))
+      (save-window-excursion
+        (condition-case err
+            (let ((bufs-before (agent-shell-buffers)))
+              ;; Omit :channel-id so bridge-enable derives the correct project
+              ;; channel via ensure-project-channel, regardless of which
+              ;; channel the command was invoked from.
+              (setq agent-shell-to-go--inherit-state
+                    (list :transport agent-shell-to-go--transport))
+              (funcall agent-shell-to-go-start-agent-function)
+              (when-let* ((new-buf
+                           (cl-find-if
+                            (lambda (b) (not (memq b bufs-before)))
+                            (agent-shell-buffers))))
+                (with-current-buffer new-buf
+                  (agent-shell-to-go-mode 1))
+                t))
+          (error
+           (setq agent-shell-to-go--inherit-state nil)
+           (agent-shell-to-go--debug "error starting agent: %s" err)
+           nil))))))
 
-; /sessions and /resume helpers
+; !sessions and !resume helpers 
 
 (defun agent-shell-to-go--resolve-project-from-channel (channel-id)
   "Return project path for CHANNEL-ID by scanning active buffers."
@@ -589,20 +700,20 @@ Updates `agent-shell-to-go--session-list-cache' on success."
              (lambda (_err _raw)
                (funcall on-failure "Failed to fetch session list.")))))))))
 
-(defun agent-shell-to-go--do-resume (transport reply project-path sessions n)
+(defun agent-shell-to-go--do-resume (reply project-path sessions n)
   "Resume the Nth entry in SESSIONS for PROJECT-PATH, notifying via REPLY."
   (let* ((session (nth (1- n) sessions))
          (sess-id (and session (map-elt session 'sessionId)))
          (title (and session (or (map-elt session 'title) "Untitled"))))
     (if (not sess-id)
         (funcall reply
-                 (format "No session #%d. Run `/sessions` to list available sessions."
-                         n))
+                 (format "No session #%d. Run `!resume` to list available sessions." n))
       (funcall reply (format "Resuming: _%s_…" title))
       (save-window-excursion
         (condition-case err
             (let ((bufs-before (agent-shell-buffers)))
-              (setq agent-shell-to-go--inherit-state (list :transport transport))
+              (setq agent-shell-to-go--inherit-state
+                    (list :transport agent-shell-to-go--transport))
               (let ((default-directory (expand-file-name project-path)))
                 (agent-shell-resume-session sess-id))
               (when-let* ((new-buf
@@ -615,7 +726,7 @@ Updates `agent-shell-to-go--session-list-cache' on success."
            (setq agent-shell-to-go--inherit-state nil)
            (funcall reply (format "Failed to resume: %s" err))))))))
 
-; agent shell subscriptions
+; agent shell subscriptions 
 
 ;; TODO: use the new session-title-changed event
 ;; This needs a more recent `agent-shell'
@@ -907,8 +1018,6 @@ Called via `agent-shell-subscribe-to' with the shell buffer current."
 
 (add-hook 'agent-shell-to-go-message-hook #'agent-shell-to-go--bridge-on-message)
 (add-hook 'agent-shell-to-go-reaction-hook #'agent-shell-to-go--bridge-on-reaction)
-(add-hook
- 'agent-shell-to-go-slash-command-hook #'agent-shell-to-go--bridge-on-slash-command)
 
 ; Enable / disable 
 

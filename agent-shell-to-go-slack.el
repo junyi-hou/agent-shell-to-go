@@ -470,7 +470,7 @@ METHOD is GET or POST, ENDPOINT is without the base URL, DATA is the payload."
      &optional
      options)
   "Post TEXT to Slack CHANNEL, optionally in THREAD-ID.
-Options plist supports :truncate :ephemeral :user-id :interaction-token."
+Options plist supports :truncate :ephemeral :user-id."
   (let* ((truncate (map-elt options :truncate))
          (ephemeral (map-elt options :ephemeral))
          (user-id (map-elt options :user-id))
@@ -565,10 +565,6 @@ Options plist supports :truncate :ephemeral :user-id :interaction-token."
                   (push `(initial_comment . ,comment) complete-data))))
           (agent-shell-to-go--slack-api "POST" "files.completeUploadExternal"
                                         complete-data))))))
-
-(cl-defmethod agent-shell-to-go-transport-acknowledge-interaction
-    ((transport agent-shell-to-go-slack-transport) _token &optional _options)
-  "No-op on Slack; interactions are acknowledged via envelope ACK in Socket Mode.")
 
 (cl-defmethod agent-shell-to-go-transport-get-message-text
     ((transport agent-shell-to-go-slack-transport) channel message-id)
@@ -768,8 +764,6 @@ Options plist supports :truncate :ephemeral :user-id :interaction-token."
     (pcase type
       ("events_api" (let ((ep (map-elt data 'payload)))
          (agent-shell-to-go--defer #'agent-shell-to-go--slack-dispatch-event transport ep)))
-      ("slash_commands" (let ((sp (map-elt data 'payload)))
-         (agent-shell-to-go--defer #'agent-shell-to-go--slack-dispatch-slash transport sp)))
       ("hello" (agent-shell-to-go--debug "slack ws: connected"))
       ("disconnect"
        (agent-shell-to-go--debug "slack ws: disconnect requested, reconnecting")
@@ -888,33 +882,6 @@ ADDED-P is t for reaction_added, nil for reaction_removed."
             :action action
             :raw-emoji emoji
             :added-p added-p))))
-
-; Slash command dispatch 
-
-(defun agent-shell-to-go--slack-dispatch-slash (transport payload)
-  "Normalize Slack slash PAYLOAD and run `agent-shell-to-go-slash-command-hook'."
-  (let* ((command (map-elt payload 'command))
-         (text (map-elt payload 'text))
-         (channel (map-elt payload 'channel_id))
-         (user (map-elt payload 'user_id))
-         (args (agent-shell-to-go--parse-slash-args command text)))
-    (agent-shell-to-go--debug "slack slash: %s %s user=%s" command text user)
-    (if (not (agent-shell-to-go-transport-authorized-p transport user))
-        (agent-shell-to-go--slack-api
-         "POST" "chat.postEphemeral"
-         `((channel . ,channel)
-           (user . ,user)
-           (text . ":no_entry: You are not authorized to use this command.")))
-      (apply #'run-hook-with-args
-             'agent-shell-to-go-slash-command-hook
-             (list
-              :transport transport
-              :command command
-              :args args
-              :args-text (or text "")
-              :channel-id channel
-              :user user
-              :interaction-token nil)))))
 
 ; Registration 
 

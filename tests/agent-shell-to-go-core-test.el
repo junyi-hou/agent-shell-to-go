@@ -19,10 +19,6 @@
 ;;     - presentation-expand-full: expand-full shows full text
 ;;     - presentation-collapse-restores: removing expand reaction restores collapsed form
 ;;
-;;   agent-shell-to-go--parse-slash-args
-;;     - slash-arg-parsing: /new-agent and /new-project args parse correctly
-;;     - slash-arg-parsing-edge-cases: empty args, whitespace-only, unknown commands
-;;
 ;;   agent-shell-to-go-register-transport / agent-shell-to-go-get-transport
 ;;     - transport-registry: transports registered and retrieved by name
 ;;
@@ -97,22 +93,6 @@
             "collapsed-header"
             (agent-shell-to-go-transport-get-message-text tr "C1" id))))
       (delete-directory agent-shell-to-go-storage-base-dir t))))
-
-(ert-deftest agent-shell-to-go-test-core-slash-arg-parsing ()
-  "Slash command args parse correctly for each command."
-  (let ((args (agent-shell-to-go--parse-slash-args "/new-agent" "~/code/myproject")))
-    (should (equal "~/code/myproject" (map-elt args :folder))))
-  (let ((args (agent-shell-to-go--parse-slash-args "/new-project" "myapp")))
-    (should (equal "myapp" (map-elt args :project-name)))))
-
-(ert-deftest agent-shell-to-go-test-core-slash-arg-parsing-edge-cases ()
-  "Slash arg parsing handles empty args and unknown commands."
-  (let ((args (agent-shell-to-go--parse-slash-args "/new-agent" "")))
-    (should (null (map-elt args :folder))))
-  (let ((args (agent-shell-to-go--parse-slash-args "/new-agent" "  ")))
-    (should (null (map-elt args :folder))))
-  (should (null (agent-shell-to-go--parse-slash-args "/unknown-command" "foo")))
-  (should (null (agent-shell-to-go--parse-slash-args "/projects" "ignored"))))
 
 (ert-deftest agent-shell-to-go-test-core-transport-registry ()
   "Transports can be registered and retrieved by name."
